@@ -320,6 +320,14 @@ fn notify_transitions(
 /// agent merge, `reader::ledger`'s per-agent newest-wins). A bead whose
 /// `type` later moves away from `needs-decision` must stop being reported,
 /// not stay flagged forever because of a row from months ago.
+///
+/// Unlike S16/S19 (see [`tick_repo`]'s doc), S17 cannot freeze under an
+/// unchanged pass: it can only ever become true by a *write* to `.beads/`'s
+/// committed sidecar, and `reader::unchanged`'s watermark stats that exact
+/// file (`reader::newest_source_mtime`) — so the write that makes a bead
+/// newly needs-decision is itself what trips S5's gate and forces the next
+/// pass to read for real. Confirmed by reading `reader::newest_source_mtime`,
+/// not assumed.
 fn needs_decision_from(rows: &[sidecar::Row]) -> Vec<String> {
     let mut latest_type: BTreeMap<&str, &str> = BTreeMap::new();
     for row in rows {
@@ -365,24 +373,171 @@ fn to_snapshot(readings: &reader::Readings, repo_root: &Path) -> RepoSnapshot {
     }
 }
 
+/// One repo's worth of one pass: mtime-prune (S5, `reader::unchanged`),
+/// read-or-reassess, diff against the previous tick's assessment for that
+/// repo, and notify what survives debounce (S15).
+///
+/// On an **unchanged** pass (S5 licenses skipping the re-READ): the re-read
+/// is skipped, but `state::assess` is re-run over `snapshot_cache`'s last
+/// built [`RepoSnapshot`] for this repo, at the new `now`. `state::assess` is
+/// a pure function of `(snapshot, now, thresholds)` — nothing in it needs a
+/// fresh read, only a fresh clock — so this is what keeps S16 (a DEAD agent)
+/// and S19 (the fleet drained) from freezing on a repo nobody is writing to:
+/// both become true by clock passage alone, with no file write to trip
+/// `reader::unchanged`'s watermark. A repo with no cached snapshot yet (the
+/// very first pass a watermark could exist for) cannot be true here — the
+/// watermark and the cache are only ever written together, in the read
+/// branch below — so that arm only exists to keep the lookup total.
+///
+/// `prev` — and therefore `notify_transitions`, and therefore the debounce
+/// and S14's becoming-true edge — is fed by this reassessed judgment exactly
+/// like a freshly-read one: this function inserts into `prev` on every call
+/// that reaches the bottom, whichever branch produced the assessment. That is
+/// what makes a state that decayed while pruned fire exactly once the first
+/// time it is assessed as true, the same "two *consecutive* ticks" contract
+/// `state::transitions` already keeps for a freshly-read repo — there is no
+/// separate rule here, only the same one applied to a `now` that moved
+/// without a `readings` to go with it.
+#[allow(clippy::too_many_arguments)]
+fn tick_repo(
+    repo: &Path,
+    now: DateTime<Utc>,
+    thresholds: &Thresholds,
+    prune_watermark: &mut HashMap<PathBuf, DateTime<Utc>>,
+    snapshot_cache: &mut HashMap<PathBuf, RepoSnapshot>,
+    prev: &mut HashMap<PathBuf, RepoAssessment>,
+    debouncer: &mut Debouncer,
+    notifier: &dyn Notifier,
+) -> std::io::Result<()> {
+    if let Some(watermark) = prune_watermark.get(repo)
+        && reader::unchanged(repo, *watermark)
+    {
+        continue_unchanged(
+            repo,
+            now,
+            thresholds,
+            snapshot_cache,
+            prev,
+            debouncer,
+            notifier,
+        )
+    } else {
+        read_and_assess(
+            repo,
+            now,
+            thresholds,
+            prune_watermark,
+            snapshot_cache,
+            prev,
+            debouncer,
+            notifier,
+        )
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn continue_unchanged(
+    repo: &Path,
+    now: DateTime<Utc>,
+    thresholds: &Thresholds,
+    snapshot_cache: &mut HashMap<PathBuf, RepoSnapshot>,
+    prev: &mut HashMap<PathBuf, RepoAssessment>,
+    debouncer: &mut Debouncer,
+    notifier: &dyn Notifier,
+) -> std::io::Result<()> {
+    // S5 licenses skipping the re-READ, not the re-assessment: `assess` is a
+    // pure function of `(snapshot, now, thresholds)`, so re-running it over
+    // the last snapshot this repo actually read still lets S16/S19 decay
+    // with the clock even though nothing on disk moved. No re-read, no
+    // cursor commit, no watermark update — none of those belong to a pass
+    // that read nothing.
+    let Some(cached) = snapshot_cache.get(repo) else {
+        // `unchanged` can only be true once `prune_watermark` holds an entry
+        // for this repo, and that entry is only ever written in
+        // `read_and_assess` alongside the matching cache entry — so this arm
+        // keeps the lookup total, not because it is reachable.
+        return Ok(());
+    };
+    let assessment = state::assess(cached, now, thresholds);
+
+    if let Some(prior_assessment) = prev.get(repo) {
+        notify_transitions(
+            repo,
+            prior_assessment,
+            &assessment,
+            now,
+            debouncer,
+            notifier,
+        )?;
+    }
+    prev.insert(repo.to_path_buf(), assessment);
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn read_and_assess(
+    repo: &Path,
+    now: DateTime<Utc>,
+    thresholds: &Thresholds,
+    prune_watermark: &mut HashMap<PathBuf, DateTime<Utc>>,
+    snapshot_cache: &mut HashMap<PathBuf, RepoSnapshot>,
+    prev: &mut HashMap<PathBuf, RepoAssessment>,
+    debouncer: &mut Debouncer,
+    notifier: &dyn Notifier,
+) -> std::io::Result<()> {
+    let read_opts = reader::Options {
+        repo_root: repo.to_path_buf(),
+        use_cursor: true,
+    };
+    // A registry entry that cannot be read this pass — moved, unmounted, a
+    // typo'd line — degrades like every other bad input in this crate: skip
+    // it and try again next pass, rather than taking the whole watcher down
+    // for one bad line (the same call `registry::read` itself makes about a
+    // malformed registry).
+    let Ok(readings) = reader::read(&read_opts) else {
+        return Ok(());
+    };
+
+    let snapshot = to_snapshot(&readings, repo);
+    let assessment = state::assess(&snapshot, now, thresholds);
+
+    // Cursor committed before any notification is attempted, exactly like
+    // `main.rs`'s `tick_once`: a panic or a broken pipe below must not leave
+    // the cursor advanced past events this pass never got to report.
+    reader::commit(repo, &readings);
+    prune_watermark.insert(repo.to_path_buf(), now);
+    snapshot_cache.insert(repo.to_path_buf(), snapshot);
+
+    if let Some(prior_assessment) = prev.get(repo) {
+        notify_transitions(
+            repo,
+            prior_assessment,
+            &assessment,
+            now,
+            debouncer,
+            notifier,
+        )?;
+    }
+    prev.insert(repo.to_path_buf(), assessment);
+    Ok(())
+}
+
 /// Watch the registry and notify on transitions, until interrupted or
 /// stdout closes.
 ///
-/// Per pass, per repo: mtime-prune (S5, `reader::unchanged`), read (S3,
-/// file-reads-only), assess, diff against the previous tick's assessment for
-/// that repo and notify what survives debounce, then sleep `interval` and
-/// repeat. A repo with no previous assessment yet — every repo, on the very
-/// first pass — produces no notifications: `state::transitions` needs two
-/// ticks to define "becomes true," and treating an already-messy fleet's
-/// entire pre-existing state as "new" the moment `quivive watch` starts
-/// would turn every startup into a notification storm rather than into a
-/// baseline.
+/// Per pass, per repo: [`tick_repo`]. A repo with no previous assessment yet
+/// — every repo, on the very first pass — produces no notifications:
+/// `state::transitions` needs two ticks to define "becomes true," and
+/// treating an already-messy fleet's entire pre-existing state as "new" the
+/// moment `quivive watch` starts would turn every startup into a
+/// notification storm rather than into a baseline.
 pub fn run(opts: &WatchOptions) -> anyhow::Result<()> {
     let repos = registry::read()?;
     let thresholds = Thresholds::default();
     let notifier = RealNotifier;
     let mut debouncer = Debouncer::new(opts.debounce);
     let mut prune_watermark: HashMap<PathBuf, DateTime<Utc>> = HashMap::new();
+    let mut snapshot_cache: HashMap<PathBuf, RepoSnapshot> = HashMap::new();
     let mut prev: HashMap<PathBuf, RepoAssessment> = HashMap::new();
 
     loop {
@@ -392,53 +547,23 @@ pub fn run(opts: &WatchOptions) -> anyhow::Result<()> {
             // why a tick reads the clock exactly once.
             let now = crate::now()?;
 
-            if let Some(watermark) = prune_watermark.get(repo)
-                && reader::unchanged(repo, *watermark)
-            {
-                continue;
+            match tick_repo(
+                repo,
+                now,
+                &thresholds,
+                &mut prune_watermark,
+                &mut snapshot_cache,
+                &mut prev,
+                &mut debouncer,
+                &notifier,
+            ) {
+                Ok(()) => {}
+                // stdout closed underneath us (`quivive watch | head -1`, or
+                // a caller that just stopped reading): this is the intended
+                // way to stop watching, not a fault.
+                Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => return Ok(()),
+                Err(e) => return Err(e.into()),
             }
-
-            let read_opts = reader::Options {
-                repo_root: repo.clone(),
-                use_cursor: true,
-            };
-            // A registry entry that cannot be read this pass — moved,
-            // unmounted, a typo'd line — degrades like every other bad input
-            // in this crate: skip it and try again next pass, rather than
-            // taking the whole watcher down for one bad line (the same call
-            // `registry::read` itself makes about a malformed registry).
-            let Ok(readings) = reader::read(&read_opts) else {
-                continue;
-            };
-
-            let snapshot = to_snapshot(&readings, repo);
-            let assessment = state::assess(&snapshot, now, &thresholds);
-
-            // Cursor committed before any notification is attempted, exactly
-            // like `main.rs`'s `tick_once`: a panic or a broken pipe below
-            // must not leave the cursor advanced past events this pass never
-            // got to report.
-            reader::commit(repo, &readings);
-            prune_watermark.insert(repo.clone(), now);
-
-            if let Some(prior_assessment) = prev.get(repo) {
-                match notify_transitions(
-                    repo,
-                    prior_assessment,
-                    &assessment,
-                    now,
-                    &mut debouncer,
-                    &notifier,
-                ) {
-                    Ok(()) => {}
-                    // stdout closed underneath us (`quivive watch | head
-                    // -1`, or a caller that just stopped reading): this is
-                    // the intended way to stop watching, not a fault.
-                    Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => return Ok(()),
-                    Err(e) => return Err(e.into()),
-                }
-            }
-            prev.insert(repo.clone(), assessment);
         }
 
         std::thread::sleep(opts.interval);
@@ -822,5 +947,186 @@ mod tests {
 
         assert!(!d.should_notify(repo, &event, clock() + chrono::TimeDelta::seconds(59)));
         assert!(d.should_notify(repo, &event, clock() + chrono::TimeDelta::seconds(60)));
+    }
+
+    // -----------------------------------------------------------------------
+    // quivive-trx: an unchanged pass must still re-assess the cached
+    // snapshot at the new clock (S5 licenses skipping the re-READ, not the
+    // re-assessment) — a repo nobody writes to after the crash must not
+    // freeze DEAD/drained forever. Both drive the clock via an injected
+    // `now` passed straight to `tick_repo`, never a real sleep.
+    // -----------------------------------------------------------------------
+
+    /// A repo with `.pact/leases/` holding one lock for `agent-1`, whose
+    /// `acquired_at` (also the lease reader's only source of agent evidence
+    /// here) is real wall-clock time at the moment of the write. The caller
+    /// captures its own `t0` with `Utc::now()` *after* this returns, so
+    /// `t0` is guaranteed to be at or after every mtime this leaves on disk
+    /// — the ordering `reader::unchanged`'s own tests rely on too.
+    fn repo_with_one_leased_agent() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let pact = dir.path().join(".pact");
+        std::fs::create_dir_all(pact.join("leases")).unwrap();
+        std::fs::write(pact.join("events.jsonl"), "").unwrap();
+        std::fs::write(
+            pact.join("leases").join("src-a.rs.lock"),
+            format!(
+                r#"{{"agent":"agent-1","path":"src/a.rs","acquired_at":"{}","ttl_secs":3600}}"#,
+                Utc::now().to_rfc3339(),
+            ),
+        )
+        .unwrap();
+        dir
+    }
+
+    /// A repo with only `.pact/activity/agent-1`, no lease — so the agent
+    /// going DEAD later cannot itself produce a `DeadHoldingPaths` item (S16
+    /// needs a held lease) and the only transition a decaying clock can
+    /// produce is S19's fleet-drained. See [`repo_with_one_leased_agent`] for
+    /// why the timestamp is real wall-clock time rather than a caller-passed
+    /// `now`.
+    fn repo_with_one_unleased_agent() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let pact = dir.path().join(".pact");
+        std::fs::create_dir_all(pact.join("activity")).unwrap();
+        std::fs::write(pact.join("events.jsonl"), "").unwrap();
+        std::fs::write(
+            pact.join("activity").join("agent-1"),
+            Utc::now().to_rfc3339(),
+        )
+        .unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_dead_agent_still_holding_paths_fires_on_a_later_unchanged_pass() {
+        let dir = repo_with_one_leased_agent();
+        let repo = dir.path().to_path_buf();
+        // Captured after every write the fixture makes, so every mtime it
+        // left on disk is `<= t0` — the precondition `reader::unchanged`
+        // needs to report true below.
+        let t0 = Utc::now();
+
+        let thresholds = Thresholds::default();
+        let notifier = RecordingNotifier::default();
+        let mut debouncer = Debouncer::new(Duration::from_secs(300));
+        let mut prune_watermark = HashMap::new();
+        let mut snapshot_cache = HashMap::new();
+        let mut prev = HashMap::new();
+
+        // Pass 1: establishes the baseline. Fresh evidence -> Active, no
+        // attention, so nothing notifies yet (no `prev` to diff against).
+        tick_repo(
+            &repo,
+            t0,
+            &thresholds,
+            &mut prune_watermark,
+            &mut snapshot_cache,
+            &mut prev,
+            &mut debouncer,
+            &notifier,
+        )
+        .unwrap();
+        assert!(
+            notifier.sent.borrow().is_empty(),
+            "the first pass over any repo must never notify"
+        );
+
+        // Sanity-check the fixture: nothing on disk has changed since pass
+        // 1, so S5's gate really would skip a re-read here.
+        assert!(reader::unchanged(&repo, t0));
+
+        // Pass 2, far past `--dead-window` (30m default), with NO write to
+        // the repo in between — the clock alone crosses the boundary.
+        let t1 = t0 + chrono::TimeDelta::seconds(3600);
+        tick_repo(
+            &repo,
+            t1,
+            &thresholds,
+            &mut prune_watermark,
+            &mut snapshot_cache,
+            &mut prev,
+            &mut debouncer,
+            &notifier,
+        )
+        .unwrap();
+
+        // The unchanged branch must not have taken the real-read path: that
+        // path is the only place `prune_watermark` is written, so if S5's
+        // skip fired, the watermark is still `t0`.
+        assert_eq!(
+            prune_watermark.get(&repo),
+            Some(&t0),
+            "an unchanged pass must not re-read (S5) — the watermark only moves on a real read"
+        );
+
+        let sent = notifier.sent.borrow();
+        assert_eq!(
+            sent.len(),
+            1,
+            "a dead agent still holding a path must notify exactly once, from clock passage alone"
+        );
+        assert!(sent[0].title.ends_with("— dead agent holding paths"));
+        assert!(
+            sent[0]
+                .body
+                .starts_with("agent-1 is dead and still holds 1 path: src/a.rs")
+        );
+    }
+
+    #[test]
+    fn a_drained_fleet_fires_on_a_later_unchanged_pass() {
+        let dir = repo_with_one_unleased_agent();
+        let repo = dir.path().to_path_buf();
+        let t0 = Utc::now();
+
+        let thresholds = Thresholds::default();
+        let notifier = RecordingNotifier::default();
+        let mut debouncer = Debouncer::new(Duration::from_secs(300));
+        let mut prune_watermark = HashMap::new();
+        let mut snapshot_cache = HashMap::new();
+        let mut prev = HashMap::new();
+
+        tick_repo(
+            &repo,
+            t0,
+            &thresholds,
+            &mut prune_watermark,
+            &mut snapshot_cache,
+            &mut prev,
+            &mut debouncer,
+            &notifier,
+        )
+        .unwrap();
+        assert!(notifier.sent.borrow().is_empty());
+        assert!(reader::unchanged(&repo, t0));
+
+        let t1 = t0 + chrono::TimeDelta::seconds(3600);
+        tick_repo(
+            &repo,
+            t1,
+            &thresholds,
+            &mut prune_watermark,
+            &mut snapshot_cache,
+            &mut prev,
+            &mut debouncer,
+            &notifier,
+        )
+        .unwrap();
+
+        assert_eq!(
+            prune_watermark.get(&repo),
+            Some(&t0),
+            "an unchanged pass must not re-read (S5) — the watermark only moves on a real read"
+        );
+
+        let sent = notifier.sent.borrow();
+        assert_eq!(
+            sent.len(),
+            1,
+            "the fleet draining must notify exactly once, from clock passage alone"
+        );
+        assert_eq!(sent[0].command, "bd ready");
+        assert!(sent[0].body.contains("the fleet drained"));
     }
 }
