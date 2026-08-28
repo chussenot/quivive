@@ -2,7 +2,7 @@
 //!
 //! docs/spec.md S22 is verbatim: "The whole CLI is: tile, watch, why." Every
 //! value list here is rendered by clap from the type that defines it —
-//! `--exit-on` from [`State`] — so `--help` cannot offer something the parser
+//! `--exit-on` from [`RepoStatus`] — so `--help` cannot offer something the parser
 //! rejects, or omit something it accepts. That is the permanent fix for a
 //! drifting list, and it is the drift the `cli-surface-auditor` role exists to
 //! catch elsewhere.
@@ -17,7 +17,8 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
-use crate::state::{ACTIVE_DEFAULT, DEAD_DEFAULT, FORGET_DEFAULT, IDLE_DEFAULT, State};
+use crate::state::{ACTIVE_DEFAULT, DEAD_DEFAULT, FORGET_DEFAULT, IDLE_DEFAULT, RepoStatus};
+use crate::watch;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -30,13 +31,14 @@ use crate::state::{ACTIVE_DEFAULT, DEAD_DEFAULT, FORGET_DEFAULT, IDLE_DEFAULT, S
     after_long_help = "EXIT CODES\n  \
         0  a tile was produced, including a quiet or degraded one\n  \
         1  no tile could be produced (bad flags, unreadable --repo)\n  \
-        2  --exit-on was given and the tile met or exceeded that state\n\n\
+        2  --exit-on was given and the tile met or exceeded that status\n\n\
         EXAMPLES\n  \
-        quivive tile                         one line, this repository\n  \
-        quivive tile --json                  the full contract\n  \
+        quivive tile                         the full contract, every registered repo\n  \
+        quivive tile --repo .                just this repository\n  \
+        quivive tile --text                  one summary line instead of the JSON payload\n  \
         quivive tile --no-cursor             force a full re-read; the fastest cursor diagnostic\n  \
         quivive why .                        the attention items behind the tile\n  \
-        quivive tile --exit-on dead || notify-send 'fleet down'\n  \
+        quivive tile --exit-on human-needed || notify-send 'fleet needs you'\n  \
         quivive tile --dead-window 2h        a fleet whose beads take an hour",
     version
 )]
@@ -62,7 +64,20 @@ pub enum Command {
     /// serves no second consumer. See docs/adr/0002-no-daemon-renderer-boundary.md.
     /// Fires on TRANSITIONS only — an event fires when it becomes true, not while
     /// it stays true (docs/spec.md S14).
-    Watch {},
+    Watch {
+        /// How often to re-check the registry for new evidence. Every repo
+        /// unchanged since its last read (docs/spec.md S5) is skipped
+        /// without a real read, so this mostly governs how quickly a
+        /// genuine change is noticed, not how much work each pass does.
+        #[arg(long, default_value = watch::INTERVAL_DEFAULT, value_name = "DURATION")]
+        interval: String,
+
+        /// Suppress a repeat notification for the same (repo, event) inside
+        /// this window, so a condition flapping true/false/true notifies
+        /// once (docs/spec.md S15).
+        #[arg(long, default_value = watch::DEBOUNCE_DEFAULT, value_name = "DURATION")]
+        debounce: String,
+    },
     /// List the attention-worthy items for one repo, each with the evidence
     /// line(s) that produced it (docs/spec.md S21).
     Why {
@@ -77,13 +92,18 @@ pub enum Command {
 
 #[derive(clap::Args, Debug, Clone)]
 pub struct Common {
-    /// The repository to describe.
-    #[arg(long, default_value = ".", value_name = "PATH", global = true)]
-    pub repo: PathBuf,
+    /// The repository to describe. Omitted: every repository named in the
+    /// registry (`~/.config/quivive/repos`, docs/spec.md S1-S2). Given: only
+    /// this one, and a path that does not resolve is a real error rather than
+    /// a degraded registry entry.
+    #[arg(long, value_name = "PATH", global = true)]
+    pub repo: Option<PathBuf>,
 
-    /// Emit the full tile contract as JSON instead of the one-line text form.
+    /// Print the compact one-line summary instead of the JSON payload.
+    /// JSON is the default (S10-S11: the payload IS the contract), so this
+    /// flag exists to opt OUT of it, not into it.
     #[arg(long, global = true)]
-    pub json: bool,
+    pub text: bool,
 
     /// Newer than this: ACTIVE.
     #[arg(long, default_value = ACTIVE_DEFAULT, value_name = "DURATION")]
@@ -104,17 +124,48 @@ pub struct Common {
     #[arg(long, default_value = FORGET_DEFAULT, value_name = "DURATION")]
     pub forget: String,
 
-    /// Exit 2 if the tile reaches this state or worse. The cheap 90% of an alert,
-    /// using whatever notifier the caller already has configured.
-    #[arg(long, value_name = "STATE")]
-    pub exit_on: Option<State>,
+    /// Exit 2 if the overall status reaches this or worse. The cheap 90% of an
+    /// alert, using whatever notifier the caller already has configured.
+    #[arg(long, value_name = "STATUS")]
+    pub exit_on: Option<RepoStatus>,
 
     /// Ignore and do not write the resume cursor: read the whole ledger.
     ///
     /// The fastest diagnostic here. If the tile changes when you pass this, the
     /// cursor is wrong; if it does not, the bug is in the fold or the readers.
-    /// Deleting .pact/vigil-cursor.json by hand does the same thing and must
+    /// Deleting .pact/quivive-cursor.json by hand does the same thing and must
     /// always be safe.
     #[arg(long)]
     pub no_cursor: bool,
+}
+
+/// Lets `--exit-on` take one of [`RepoStatus`]'s five S8 spellings and renders
+/// them into `--help`, without `state.rs` — which predates `--exit-on`
+/// retargeting from `State` to `RepoStatus` — taking a `clap` dependency for a
+/// concern that is entirely this CLI's. `RepoStatus` is defined in this crate,
+/// so implementing the foreign `ValueEnum` trait for it here is ordinary Rust,
+/// not a workaround: only one of the trait or the type needs to be local, and
+/// the type is. The spellings mirror `RepoStatus`'s own
+/// `#[serde(rename_all = "kebab-case")]` exactly, so the JSON payload and
+/// `--exit-on`'s accepted values cannot disagree about a status name.
+impl clap::ValueEnum for RepoStatus {
+    fn value_variants<'a>() -> &'a [Self] {
+        &[
+            RepoStatus::HumanNeeded,
+            RepoStatus::Active,
+            RepoStatus::Drained,
+            RepoStatus::AllQuiet,
+            RepoStatus::NoFleet,
+        ]
+    }
+
+    fn to_possible_value(&self) -> Option<clap::builder::PossibleValue> {
+        Some(clap::builder::PossibleValue::new(match self {
+            RepoStatus::HumanNeeded => "human-needed",
+            RepoStatus::Active => "active",
+            RepoStatus::Drained => "drained",
+            RepoStatus::AllQuiet => "all-quiet",
+            RepoStatus::NoFleet => "no-fleet",
+        }))
+    }
 }

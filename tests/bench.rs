@@ -15,9 +15,8 @@ use std::io::Write;
 use std::time::{Duration, Instant};
 
 use chrono::TimeDelta;
-use quivive::reader::{self, Options};
 use quivive::state::Thresholds;
-use quivive::tile::Tile;
+use quivive::tile;
 
 /// The size the ceilings are quoted at. Large enough to be a busy long-lived
 /// repository, and 20x pact's own rewrite threshold of 5000 lines — so this also
@@ -62,13 +61,10 @@ fn synthetic_ledger(dir: &std::path::Path, events: usize) {
 
 fn tick(root: &std::path::Path, use_cursor: bool) -> Duration {
     let t = Instant::now();
-    let readings = reader::read(&Options {
-        repo_root: root.to_path_buf(),
-        use_cursor,
-    })
-    .unwrap();
-    let _ = Tile::build(&readings, "bench", support::now(), &Thresholds::default());
-    reader::commit(root, &readings);
+    // `tile::tick` is the read-classify-commit sequence the real CLI runs per
+    // repo, so this measures the actual per-tick cost rather than a bench-only
+    // approximation of it.
+    let _ = tile::tick(root, support::now(), &Thresholds::default(), use_cursor).unwrap();
     t.elapsed()
 }
 
