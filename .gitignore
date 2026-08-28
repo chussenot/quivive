@@ -16,3 +16,7 @@
 .beads-credential-key
 .beads/proxieddb/
 *.gate.lock*
+
+# The plan manifest handed to `pact plan lint` is a build artifact of one run
+# (pact docs/plan.md); the linted snapshot that travels is .pact/plan.json.
+plan.jsonl

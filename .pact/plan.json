@@ -1,0 +1,58 @@
+{
+  "at": "2026-08-28T10:34:49.999935001+00:00",
+  "edges": {
+    "quivive-0hu": [
+      "quivive-8mq",
+      "quivive-15r",
+      "quivive-5uv",
+      "quivive-jx3"
+    ],
+    "quivive-113": [
+      "quivive-qeg"
+    ],
+    "quivive-15r": [
+      "quivive-o3j",
+      "quivive-ykn"
+    ],
+    "quivive-5uv": [
+      "quivive-eea"
+    ],
+    "quivive-8mq": [
+      "quivive-o3j",
+      "quivive-ykn"
+    ],
+    "quivive-eea": [
+      "quivive-113",
+      "quivive-o3j",
+      "quivive-ykn"
+    ],
+    "quivive-ipc": [
+      "quivive-ykn"
+    ],
+    "quivive-jx3": [
+      "quivive-eea",
+      "quivive-ipc"
+    ],
+    "quivive-o3j": [
+      "quivive-qeg"
+    ],
+    "quivive-qeg": [],
+    "quivive-ykn": [
+      "quivive-qeg"
+    ]
+  },
+  "waves": {
+    "quivive-0hu": 5,
+    "quivive-113": 2,
+    "quivive-15r": 3,
+    "quivive-5uv": 4,
+    "quivive-8mq": 3,
+    "quivive-eea": 3,
+    "quivive-ipc": 3,
+    "quivive-jx3": 4,
+    "quivive-o3j": 2,
+    "quivive-qeg": 1,
+    "quivive-ykn": 2
+  },
+  "gates": []
+}
