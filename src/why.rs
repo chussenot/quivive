@@ -723,7 +723,27 @@ mod tests {
         fn activity(&self, agent: &str, secs_ago: i64) -> &Self {
             let dir = self.dir.path().join(".pact").join("activity");
             std::fs::create_dir_all(&dir).unwrap();
-            std::fs::write(dir.join(agent), stamp(secs_ago)).unwrap();
+            let path = dir.join(agent);
+            std::fs::write(&path, stamp(secs_ago)).unwrap();
+            // `reader::activity::read` takes `max(content, file mtime)` (see its
+            // module doc). Left alone, the file's mtime is the REAL filesystem
+            // clock at write time, not the frozen `now()` this fixture pretends
+            // the record was written under — so the moment wall-clock drifts
+            // past `NOW`, the real mtime silently outvotes a deliberately-stale
+            // content timestamp and the agent reads as ACTIVE instead of DEAD
+            // (quivive-jwp: this is exactly what made this file's tests
+            // time-dependent). Pinning the mtime to the same instant the
+            // content claims removes the real clock from the experiment
+            // entirely: the two readings agree, matching the reader's own
+            // documented "ordinary case" where they are written together.
+            let target: std::time::SystemTime =
+                (now() - chrono::TimeDelta::seconds(secs_ago)).into();
+            std::fs::File::options()
+                .write(true)
+                .open(&path)
+                .unwrap()
+                .set_modified(target)
+                .unwrap();
             self
         }
 
