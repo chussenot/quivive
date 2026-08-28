@@ -124,7 +124,12 @@ was measured, on what, and what it changed. A study is allowed to report that
 nothing was learned; it is not allowed to report a number nobody ran.
 
 **Graphs are Mermaid in markdown.** No image files, no embeds (*gated*). A diagram
-you cannot diff is a diagram that quietly stops matching the system it draws.
+you cannot diff is a diagram that quietly stops matching the system it draws. The one image exception is
+`docs/media/`: **screenshots of rendered output** (the pwetty tile photographed
+over this repository's own ledger). A screenshot is evidence, not a diagram — it
+is not a drawing of the system that can drift, it *is* the system's output — and
+the exemption is per-directory (*gated*) precisely so a diagram cannot sneak in
+as a PNG anywhere else.
 
 **The README answers *why* and stays DRY.** What gap quivive fills in the family,
 the boundary with agentic-db, the shape of the refusals — and a link out for

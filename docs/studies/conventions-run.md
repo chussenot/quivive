@@ -459,3 +459,46 @@ holder went quiet — `tile-r2`, `watch-r2`, `watch-r3`, `why-r2` — which is t
 `--to-owner-of` addressing scheme in `AGENTS.md` working as designed: the
 lease note that `tile-r2` inherited on acquiring `docs/tile-contract.md` said
 in so many words that it was "resuming dead holder's work."
+
+## Phase 3 — the accounting battery, and what it flagged
+
+Run after the last merge, against the committed ledger (262 events, 34
+messages, 8 agent identities on 3 models across 88 commits and 8 verified
+mutex merges). Clean checks first: **topology** (every context-stamped event
+from a worktree, the orchestrator's 14 main-checkout events excused by
+`--allow-main`), **double-win** (no two agents ever held one path at once),
+**merge-divergence** (every hold started from the content the previous holder
+left), **chain-integrity** (no gap, edit or forgery in the tracked portion),
+and handoff coverage 10 of 10 beads-with-dependents.
+
+The exceptions, each explained rather than excused away:
+
+- **One uncovered commit** (`commit-correlation`): the gate-order agent edited
+  `src/cursor.rs` — the `started` set had to persist through the resume
+  cursor — without leasing it; its lease named four files and the fix needed a
+  fifth. The check exists for exactly this and caught exactly this. The edit
+  itself was correct and merged under the oracle.
+- **Ten expired holds** (`stale-holds`): the two agents killed mid-work by a
+  model session limit died holding 3 and 7 paths; the leases lapsed at TTL and
+  were reclaimed, and `-r2` successors resumed the worktrees. A corpse cannot
+  release.
+- **Two silent contentions**: both are the same deaths seen from the waiting
+  side — the paths were freed by expiry, so no release message was ever going
+  to be sent.
+- **One 45-retry "storm"** that was actually one compliant `--wait 10m`: pact's
+  wait loop writes a refusal event per internal ~15s poll, so its own audit
+  cannot tell an obedient waiter from the storm the check hunts. Filed as
+  friction to upstream (quivive-cql), with this ledger as the evidence.
+- **gate-order: could not run** — this plan declared waves but no gate beads,
+  so the check had nothing to order against. The charter says gates are beads;
+  this run enforced its barriers by orchestrator sequencing instead, and the
+  audit's silence here is the honest price of that choice.
+- **claim-lease-divergence: could not run** — bd's audit sidecar records only
+  from enablement, and it was enabled at verification time, not at spawn time.
+  On since `bd config set audit.enabled true`; the next fleet gets the check
+  this one could not have.
+
+The second-laptop simulation and its one-row drift are in
+[docs/beads-on-other-laptops.md](../beads-on-other-laptops.md); the S6 bench
+(23 µs per repo, ceiling 10 ms) is in the fleet-run section above.
+

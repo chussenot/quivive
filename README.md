@@ -13,6 +13,14 @@ audience: everyone
 answers that, cheaply enough to run on a status bar every second and to push a
 notification the moment the answer changes.
 
+![the pwetty tile rendering this repository's own fleet, mid-build](docs/media/fleet-tile.png)
+
+*The tile above is not a mockup: it is `quivive tile` run against this
+repository's own committed `.pact/events.jsonl`, rendered by the
+[pwetty tile](https://github.com/chussenot/waybar-pwetty-box) this run
+contributed — the fleet that built quivive, seen through quivive, mid-build.
+pact records, recount explains, quivive stays on the qui-vive.*
+
 > **State of the work:** the crate is built and does what this page describes —
 > `mise run check` is green, and the design's load-bearing invariant is asserted
 > against real pact ledgers and against concurrent writers. Unreleased: there is no
@@ -166,6 +174,7 @@ repository ports two of their roles outright.
 | [docs/tile-contract.md](docs/tile-contract.md) | the emitted shape, the text form, exit codes, versioning |
 | [docs/adr/](docs/adr/README.md) | the decisions, with alternatives priced |
 | [docs/studies/](docs/studies/conventions-run.md) | field evidence from real runs |
+| [docs/beads-on-other-laptops.md](docs/beads-on-other-laptops.md) | reaching the task graph from a second machine, and the boundary of what travels |
 | [.claude/agents/](.claude/agents/docs-writer.md) | the recurring roles this repository is worked by |
 
 Contributors: `mise run check` is the whole required gate, and it is the same

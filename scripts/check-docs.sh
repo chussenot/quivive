@@ -25,8 +25,10 @@
 #      at a real ADR — both directions, because a one-directional check only
 #      catches the half of drift you happened to think of.
 #   5. Every relative link and every #anchor in every markdown file resolves.
-#   6. Diagrams are diffable text: no image file under docs/, no markdown image
-#      embed anywhere, and no unclosed fenced block.
+#   6. Diagrams are diffable text: no image file under docs/ and no markdown
+#      image embed anywhere — except screenshots of rendered output, which live
+#      in docs/media/ and may be embedded from there (evidence, not diagrams) —
+#      and no unclosed fenced block.
 #
 # The file list is walked at runtime, never hardcoded here — a hardcoded list is
 # the same drift problem one level down.
@@ -194,11 +196,13 @@ echo "diagrams are text"
 # Mermaid in-markdown, never an image file: a diagram you cannot diff is a
 # diagram that stops matching the system it draws and nobody can see that it has.
 while read -r img; do
-	note "docs/ contains an image file: $img — diagrams are Mermaid in markdown"
-done < <(find docs -type f \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.svg' -o -name '*.gif' -o -name '*.webp' \) 2>/dev/null)
+	note "docs/ contains an image file: $img — diagrams are Mermaid in markdown (screenshots go in docs/media/)"
+done < <(find docs -type f \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.svg' -o -name '*.gif' -o -name '*.webp' \) -not -path 'docs/media/*' 2>/dev/null)
 
 for f in "${docs[@]}"; do
-	grep -qE '!\[[^]]*\]\(' "$f" && note "$f embeds an image; diagrams are Mermaid in markdown"
+	# Screenshots referenced from docs/media/ are the one allowed embed — see the
+	# comment above the image-file check.
+	grep -E '!\[[^]]*\]\(' "$f" | grep -qvE '\]\([^)]*docs/media/|\]\(media/' && note "$f embeds an image; diagrams are Mermaid in markdown (screenshots from docs/media/ are the one exception)"
 	# An unclosed fence swallows the rest of the page on every renderer. Cheap to
 	# do, invisible in a diff, and it has to be an odd count to be wrong.
 	fences=$(grep -cE '^[[:space:]]*```' "$f")
