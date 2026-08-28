@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 
 use crate::state::{ACTIVE_DEFAULT, DEAD_DEFAULT, FORGET_DEFAULT, IDLE_DEFAULT, RepoStatus};
-use crate::watch;
+use crate::{stream, watch};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -36,6 +36,7 @@ use crate::watch;
         quivive tile                         the full contract, every registered repo\n  \
         quivive tile --repo .                just this repository\n  \
         quivive tile --text                  one summary line instead of the JSON payload\n  \
+        quivive tile --stream                one JSON line per change, for pwetty (S9)\n  \
         quivive tile --no-cursor             force a full re-read; the fastest cursor diagnostic\n  \
         quivive why .                        the attention items behind the tile\n  \
         quivive tile --exit-on human-needed || notify-send 'fleet needs you'\n  \
@@ -57,6 +58,12 @@ pub enum Command {
         /// JSON line per change and stay alive. See docs/spec.md S9.
         #[arg(long)]
         stream: bool,
+
+        /// How often to tick in `--stream` mode. Ignored otherwise. ~1s
+        /// matches S9's own "pwetty ... respawns after ~1 s" — see
+        /// `stream::INTERVAL_DEFAULT` for the full justification.
+        #[arg(long, default_value = stream::INTERVAL_DEFAULT, value_name = "DURATION")]
+        interval: String,
     },
     /// Send `notify-send` notifications on fleet transitions, until interrupted.
     ///

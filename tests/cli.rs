@@ -342,19 +342,63 @@ fn why_lists_the_attention_items_for_one_repo() {
 }
 
 #[test]
-fn tile_stream_is_not_implemented_yet() {
-    // docs/spec.md S9. Lands in a later bead (quivive-5uv); until then it is a
-    // real flag that fails loudly rather than silently doing nothing. Same
-    // caveat as `watch_is_not_implemented_yet` above: this is THIS branch's
-    // actual behavior, not a claim about whether quivive-5uv has landed
-    // somewhere else.
+fn tile_stream_emits_one_line_immediately_and_stays_alive() {
+    // docs/spec.md S9, the pwetty push contract, driven through the real
+    // process: `--stream` must actually be a long-lived subcommand that
+    // emits and does not exit, which is a property of the binary's process
+    // lifecycle, not of `quivive::stream::run` in isolation (unit-tested
+    // directly in `src/stream.rs`).
+    //
+    // Bounded rather than blocking: the read runs on its own thread so a
+    // stream that never produces a line fails this test after
+    // `READ_DEADLINE` instead of hanging the suite.
     let f = fleet();
-    let o = quivive(&["tile", "--repo", f.root().to_str().unwrap(), "--stream"]);
-    assert_eq!(o.status.code(), Some(1));
+    let mut child = Command::new(env!("CARGO_BIN_EXE_quivive"))
+        .args([
+            "tile",
+            "--repo",
+            f.root().to_str().unwrap(),
+            "--stream",
+            // `dur::parse` has no sub-second unit; irrelevant here anyway —
+            // the first tick fires immediately, before any sleep.
+            "--interval",
+            "1s",
+        ])
+        .env("QUIVIVE_NOW", support::NOW)
+        .env_remove("PACT_STATE_DIR")
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("the binary under test must run");
+
+    let stdout = child.stdout.take().expect("stdout was piped");
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        use std::io::BufRead;
+        let mut line = String::new();
+        let result = std::io::BufReader::new(stdout).read_line(&mut line);
+        let _ = tx.send(result.map(|n| (n, line)));
+    });
+
+    const READ_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
+    let (n, line) = rx
+        .recv_timeout(READ_DEADLINE)
+        .expect("the first stream line must arrive well within the deadline")
+        .expect("reading the first stream line must not fail");
+    assert!(n > 0, "the first tick must emit immediately");
+    let v: serde_json::Value =
+        serde_json::from_str(line.trim()).expect("a single compact JSON line");
+    assert_eq!(v["status"], "active");
+
+    // Still alive after its first line: S9 says "stay alive between
+    // changes," not "print once and exit" the way one-shot `tile` does.
+    std::thread::sleep(std::time::Duration::from_millis(100));
     assert!(
-        String::from_utf8_lossy(&o.stderr).contains("not implemented yet"),
-        "{o:?}"
+        child.try_wait().unwrap().is_none(),
+        "--stream must not exit after emitting its first line"
     );
+
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 #[test]
