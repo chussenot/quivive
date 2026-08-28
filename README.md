@@ -95,7 +95,7 @@ instead of by prose, and it is why a golden here never needs a `sleep`. →
 **`DEAD` is a claim vigil is willing to be wrong about, loudly.** It is the one
 state anybody acts on, so the thresholds behind it are the user's business: a fleet
 whose beads take an hour needs different windows than one whose beads take a
-minute, and no default is right for both. → [the state machine](docs/spec.md#the-state-machine)
+minute, and no default is right for both. → [the state machine](docs/adr/0001-stream-first-tile.md)
 
 ## What vigil refuses
 

@@ -46,8 +46,13 @@ note() {
 # `find`, not `git ls-files`: an untracked page is a brand-new one, which is
 # exactly the page most likely to be missing its front matter or carrying a
 # broken link.
+# AGENTS.md and .beads/ are exempt: both are written and rewritten by other
+# tools (pact's managed protocol block, bd's workspace README), and front matter
+# added by hand would be deleted by the next `pact init` or `bd init`. A rule a
+# tool un-applies on every sync is not a rule, it is a fight.
 mapfile -t docs < <(find . -name '*.md' \
-	-not -path './target/*' -not -path './.git/*' -not -path './wt/*' | sort)
+	-not -path './target/*' -not -path './.git/*' -not -path './wt/*' \
+	-not -path './.beads/*' -not -name 'AGENTS.md' | sort)
 
 [ "${#docs[@]}" -gt 0 ] || {
 	echo "check-docs: found no markdown at all — run me from the repo" >&2

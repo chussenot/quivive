@@ -20,7 +20,7 @@ long-lived repository produces hundreds of thousands.
 Two properties of the question shape everything else:
 
 - **It is about recency, not history.** Every state in
-  [the state machine](../spec.md#the-state-machine) is decided by *how old* an
+  [the state machine](../spec.md#tick) is decided by *how old* an
   agent's newest event is. Nothing in the tile needs an event from last Tuesday.
 - **It is a reduction.** The answer is a fixed-size summary — a handful of
   per-agent states — no matter how many events produced it.
@@ -93,7 +93,7 @@ apart.
 - **The cursor is a cache, never a record.** Any bug that can only be fixed by
   keeping more state in it should be read as evidence the fold is wrong.
   `mise run fleet` is the standing proof, and `mise run bench` measures the
-  ceiling in [docs/spec.md](../spec.md#the-tick).
+  ceiling in [docs/spec.md](../spec.md#tick).
 - **Goldens are possible.** Because a tick is pure, the tile for a frozen ledger
   at a frozen clock is a fixed string, so the contract can be pinned by
   `mise run tile-goldens` instead of by prose. A golden test that needs a sleep

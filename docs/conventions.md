@@ -32,7 +32,7 @@ commands, and there is no second definition of "the tests" to drift.
 | `mise run tile-goldens` | the [tile contract](tile-contract.md) alone, for iterating |
 | `mise run lint` | clippy `--all-targets -- -D warnings` |
 | `mise run lint-scripts` | shellcheck at warning severity |
-| `mise run bench` | the [per-tick ceilings](spec.md#the-tick). Not in `check`: minutes long |
+| `mise run bench` | the [per-tick ceilings](spec.md#tick). Not in `check`: minutes long |
 | `mise run fleet` | the resume-cursor invariant against a live fleet. Not in `check`: probabilistic |
 | `mise run check-docs` | everything on this page marked *gated* below |
 | `mise run check` | all of the above that belong in a required gate, **serially, in CI's order** |
