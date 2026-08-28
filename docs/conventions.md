@@ -126,7 +126,7 @@ nothing was learned; it is not allowed to report a number nobody ran.
 **Graphs are Mermaid in markdown.** No image files, no embeds (*gated*). A diagram
 you cannot diff is a diagram that quietly stops matching the system it draws.
 
-**The README answers *why* and stays DRY.** What gap vigil fills in the family,
+**The README answers *why* and stays DRY.** What gap quivive fills in the family,
 the boundary with agentic-db, the shape of the refusals — and a link out for
 everything else. If a section explains *how* at length, it belongs in `docs/`.
 Not gated, and the honest reason is that no cheap check distinguishes a necessary
