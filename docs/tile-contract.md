@@ -2,226 +2,275 @@
 title: The tile contract
 status: active
 date: 2026-08-28
-description: The versioned shape vigil emits — fields, text form, exit codes, and the rules for changing any of it.
+description: The versioned shape quivive emits — fields, text form, exit codes, and the rules for changing any of it.
 ---
 
 # The tile contract
 
-Written before the implementation, and implemented unchanged — which was the
-point of writing it first: the goldens had something to be golden against.
+The tile is **quivive's API**. Not the CLI flags, not the text layout — the
+payload. [ADR-0002](adr/0002-no-daemon-renderer-boundary.md) is why: quivive
+emits a shape and somebody else draws it, so the shape is the thing consumers
+depend on and the thing that must not move under them.
 
-The tile is **vigil's API**. Not the CLI flags, not the text layout — the tile.
-[ADR-0002](adr/0002-no-daemon-renderer-boundary.md) is why: vigil emits a shape
-and somebody else draws it, so the shape is the thing consumers depend on and the
-thing that must not move under them.
+## This is a breaking reshape, and `v` does not move
+
+The tile used to describe **one** repository (`repo`, `fleet`, `worst`,
+`agents[]`, `blocked_leases`, `degraded`). It now describes the whole fleet —
+S11: overall `status`, one entry per repository, agent counts and attention
+items per entry. That is a removal, a rename and a meaning change all at once
+— ordinarily the textbook case for moving `v`.
+
+It stays `1` here for one reason: **no release of this crate has ever
+shipped**, under either name (`vigil` or `quivive`), so there is no consumer
+of the old shape for a version bump to protect. The old shape is not kept
+below either, for the same reason a changelog does not carry a version that
+was never released. The next reshape after this one, if there is ever a
+consumer depending on this page, is a real `v: 2` and a real "previous shape"
+section — this paragraph is what that decision will look like.
 
 ## The shape
 
-Both examples on this page are the `mixed` golden verbatim
-(`tests/goldens/mixed.json` and `.txt`), not prose written to look like output.
-`REPO` is that fixture's placeholder for the repository path; a real tile carries
-an absolute path there. Sample output on this page is never hand-edited — a
-sibling repository has two version examples that went stale exactly that way,
-because somebody updated the surrounding prose and adjusted the sample from
-memory.
+Every example on this page is real `quivive tile` output, piped through
+nothing — never hand-typed, never adjusted from memory after the surrounding
+prose changed. That discipline is the point: a sibling repository has two
+version examples that went stale exactly the other way.
+
+This is `quivive tile` with a two-repository registry — one repo with a live
+agent, one with a dead agent still holding a lease:
 
 ```json
 {
   "v": 1,
   "at": "2026-08-28T09:00:00Z",
-  "repo": "REPO",
-  "fleet": {
-    "active": 3,
-    "idle": 3,
-    "stale": 1,
-    "dead": 1,
-    "total": 8
-  },
-  "worst": "dead",
-  "agents": [
+  "status": "human-needed",
+  "repos": [
     {
-      "id": "agent-6",
-      "state": "dead",
-      "age_s": 2400,
-      "leases": []
+      "name": "active",
+      "path": "/home/user/repos/active",
+      "status": "active",
+      "agents": {
+        "active": 1,
+        "idle": 0,
+        "stale": 0,
+        "dead": 0
+      },
+      "attention": []
     },
     {
-      "id": "agent-3",
-      "state": "stale",
-      "age_s": 412,
-      "leases": [
-        "src/fold.rs"
-      ]
-    },
-    {
-      "id": "agent-5",
-      "state": "idle",
-      "age_s": 250,
-      "leases": []
-    },
-    {
-      "id": "agent-4",
-      "state": "idle",
-      "age_s": 120,
-      "leases": []
-    },
-    {
-      "id": "agent-8",
-      "state": "idle",
-      "age_s": 60,
-      "leases": []
-    },
-    {
-      "id": "agent-7",
-      "state": "active",
-      "age_s": 59,
-      "leases": []
-    },
-    {
-      "id": "agent-2",
-      "state": "active",
-      "age_s": 30,
-      "leases": []
-    },
-    {
-      "id": "agent-1",
-      "state": "active",
-      "age_s": 5,
-      "leases": [
-        "src/tile.rs"
+      "name": "humanneeded",
+      "path": "/home/user/repos/humanneeded",
+      "status": "human-needed",
+      "agents": {
+        "active": 0,
+        "idle": 0,
+        "stale": 0,
+        "dead": 1
+      },
+      "attention": [
+        {
+          "kind": "dead_holding_paths",
+          "agent": "ghost",
+          "paths": [
+            "src/fold.rs"
+          ],
+          "remaining_ttl": 0
+        }
       ]
     }
-  ],
-  "blocked_leases": [
-    {
-      "path": "src/fold.rs",
-      "held_by": "agent-3",
-      "expired_s": 112
-    }
-  ],
-  "degraded": []
+  ]
 }
 ```
+
+(`path` above is shortened for the page; a real tile carries the absolute,
+canonicalized path quivive actually read.)
 
 | Field | Type | Meaning |
 |---|---|---|
 | `v` | integer | contract version. See [Changing the contract](#changing-the-contract) |
-| `at` | RFC 3339, UTC | the clock this tick was computed against — **not** "now" at read time |
-| `repo` | absolute path | which repository this tile describes |
-| `fleet` | counts | one count per state, plus `total`. Always all five keys, zeros included |
-| `worst` | state name | the highest-severity state present, or `"quiet"` when `total` is 0 |
-| `agents` | array | one entry per remembered agent, ordered by severity then by age descending |
-| `blocked_leases` | array | leases held by a `STALE` or `DEAD` agent — the actionable subset |
-| `degraded` | array of strings | readers that could not read, and decline counts, named. Empty is the normal case |
+| `at` | RFC 3339, UTC | the clock this tick was computed against — **not** "now" at read time, and read exactly once for the whole payload |
+| `status` | one of S8's five | the worst status across every repo — see [Overall status](#overall-status-and-severity) |
+| `repos` | array | one entry per repository quivive was told about, in registry order. Empty when the registry is empty or missing (S1-S2) |
+| `repos[].name` | string | the directory basename — what a bar has room to print |
+| `repos[].path` | absolute path | the full, canonicalized path — what a human needs when two checkouts share a `name` |
+| `repos[].status` | one of S8's five | this repo's own status, by the same precedence as the overall one |
+| `repos[].agents` | counts | `active`/`idle`/`stale`/`dead`. Always all four keys, zeros included. Counts, not a per-agent list — S11 asks for counts, and `quivive why` (S21) is where a human goes for names |
+| `repos[].attention` | array | S16-S18 items, empty in the normal case — see [Attention items](#attention-items) |
 
-Two field choices carry most of the weight:
+### Overall status, and severity
 
-**`worst` exists so that a renderer never has to reimplement severity ordering.**
-A bar wants one colour, and every bar deriving "which colour" from four counts is
-four chances to disagree with vigil about what matters. Severity order is
-`dead > stale > idle > active > quiet`, decided here, once.
+S8's five statuses, in precedence order — `human-needed` outranks everything
+because it is the one status that actually asks a human to act right now;
+`active` is next among the ones nobody needs to act on; `drained` outranks
+`all-quiet` because it names a repo that *was* worked and stopped, which a
+human skimming a multi-repo tile is more likely to wonder about than a repo
+with no history at all; `no-fleet` is the floor.
 
-**`degraded` is a field, not a log line, and never an error.** A repository with
-no `.pact/` is not broken, and a tile that exits non-zero because one reader found
-nothing would take a status bar down over a normal condition. Naming the reader in
-the tile lets a renderer show a dimmed tile instead of an empty one, which is the
-difference between "nothing is running" and "I cannot see".
+```
+human-needed > active > drained > all-quiet > no-fleet
+```
 
-`age_s` is seconds, integer, relative to `at` — not a formatted string. A
-formatted age is a rendering decision, and a bar that wants `6m` can compute it;
-a bar that gets `6m` and wants seconds cannot.
+The payload's top-level `status` is the worst of every `repos[].status` by
+this order — an empty `repos` array (an empty or missing registry) has
+nothing to take the max of and reads as `no-fleet`, the same "nothing to see"
+a single repo with no pact in it gets:
 
-### What `degraded` can say
+```json
+{
+  "v": 1,
+  "at": "2026-08-28T09:00:00Z",
+  "status": "no-fleet",
+  "repos": []
+}
+```
 
-Two shapes, both plain strings, and both additive — a new reason does not move
-`v`, so a consumer must not enumerate them exhaustively:
+That is `quivive tile` run with `XDG_CONFIG_HOME` pointed at a directory with
+no `quivive/repos` file in it — S2's "a missing registry file means an empty
+registry, not an error" — and it is the shape `quivive-eea`'s acceptance
+criteria names verbatim.
 
-* `"ledger"` — the reader could not read at all. There is no `"lease"` equivalent:
-  a missing leases directory is a repository's resting state, not a fault.
-* `"<reader>: N unparsable line(s)"` / `"... lock(s)"` — a decline count. Declines
-  are counted rather than swallowed because a decline count nobody knows about is
-  this reader's most likely undetected defect. A blank line is **not** a decline
-  (pact's compaction can leave one), and neither is pact's staging sibling beside
-  the lock files (a tick landing mid-acquire will see it).
+Nothing in this JSON shape encodes the severity order above — it is a fact
+about the *renderer's* precedence, not a field. That is exactly why moving it
+is invisible in a diff of the shape and has to be a deliberate, breaking call;
+see [Changing the contract](#changing-the-contract).
+
+### Attention items
+
+S16-S18, one shape per kind, tagged by `kind`:
+
+* **`dead_holding_paths`** (S16) — a DEAD agent holds one or more leases. One
+  item per holder, not per lease: `agent`, the sorted `paths` it holds, and
+  `remaining_ttl` (seconds, the minimum across those leases, clamped at 0 —
+  never negative).
+* **`needs_decision`** — a bead the committed sidecar flags as needing a
+  human call: `bead_id`.
+* **`gate_order_violation`** (S18) — work in a wave started before an earlier
+  wave's declared gate closed: `started_id`, `started_wave`, `open_gate_id`,
+  `gate_wave`. Only the earliest open gate blocking a given `started_id` is
+  reported, so closing gates one at a time does not reshuffle the set.
+
+Any non-empty `attention` array is what makes a repo's status `human-needed`
+— S8's own first line. A `STALE` holder does **not** produce
+`dead_holding_paths`; only `DEAD` does, which is why an otherwise-busy fleet
+with one stale agent still reads as `active`, not `human-needed`.
+
+`age_s`-shaped values are always integers, seconds, relative to `at` — never
+a formatted string. A formatted age is a rendering decision: a bar that wants
+`6m52s` can compute it from an integer; a bar handed `6m52s` and wanting
+seconds cannot get back.
 
 ### Determinism, and the clock
 
-A tile carries the instant it was computed at, so two invocations a millisecond
-apart are legitimately different tiles. `VIGIL_NOW` (RFC3339) freezes the clock,
-and with it frozen **two invocations over the same ledger produce byte-identical
-output** — including one that resumed a cursor and one given `--no-cursor`.
+A tick reads `at` exactly once for the whole payload, however many
+repositories it covers — reading the clock per repo is a tile that cannot be
+golden, and a payload whose `at` could disagree with what each repo was
+actually judged against. `QUIVIVE_NOW` (RFC3339) freezes that read, and with
+it frozen **two invocations over the same evidence produce byte-identical
+output** — including one that resumed the cursor and one given
+`--no-cursor`. A malformed `QUIVIVE_NOW` is an error, not a silent fall back
+to the wall clock: a seam that quietly ignores a bad value would make every
+comparison pass for the wrong reason.
 
-That is not a convenience for tests. It is the only way to state the purity claim
-of [ADR-0001](adr/0001-stream-first-tile.md) about the *binary* somebody runs
-rather than about the library, and it is what `scripts/fleet-sim.sh` asserts. A
-malformed `VIGIL_NOW` is an error rather than a silent fall back to the wall
-clock: a seam that quietly ignores a bad value makes every comparison pass for the
-wrong reason.
+The resume cursor lives at `.pact/quivive-cursor.json` per repository (the
+crate was renamed from `vigil`; there is no migration from the old
+`.pact/vigil-cursor.json` name, because a cache is correct to throw away).
+Its path is part of this contract for one reason: **a consumer is entitled
+to delete it, and deleting it must only ever cost time, never change the
+tile** — the one invariant in [ADR-0001](adr/0001-stream-first-tile.md).
+Its *contents* are not part of the contract and may change shape without
+notice. `--no-cursor` does the same thing as deleting the file, without
+touching it.
 
 ## The text form
 
-`vigil tile` without `--json` prints exactly one line, no trailing decoration:
+`--text` prints one line per invocation, no trailing decoration — real
+output, over the same two-repository registry as the JSON example above:
 
 ```
-3A 3I 1S 1D  worst=dead  agent-6 dead 40m0s
+human-needed  2 repos: 1 active, 1 human-needed
 ```
 
-The counts come first because they are what a glance is for. The detail after
-`worst=` names the single worst agent, **and only when somebody should look at
-it** — naming the worst agent on a healthy fleet would spend the one line of room
-on the least interesting fact in the tile. `(holds <path>)` is appended when that
-agent is sitting on a lease, with `+N` for the rest.
+The overall status comes first because it is what a glance is for; the
+per-status repo counts follow. A single repo reads the same way with
+singular grammar:
 
-The text form is **also** a contract, for the reason
-[ADR-0002](adr/0002-no-daemon-renderer-boundary.md#alternatives-considered)
-gives: consumers parse it whether or not they are invited to, so it is cheaper to
-declare a shape than to pretend one does not exist. It is pinned by the same
-goldens as the JSON.
+```
+active  1 repo: 1 active
+```
 
-It is one line, always, including when nothing is running (`quiet`) and when every
-reader failed (`unreadable: ledger`). A status bar has one line of room; a tool
-that sometimes needs two has no way to say so.
+This is a bonus rendering on top of the payload — costs nothing extra to
+compute — and is **not** part of the versioned contract S11 pins the way the
+JSON shape is: it is not goldened field-by-field the way `v`, `status` and
+`repos[]` are, and a future bar-focused reshape of it (truncation, a worst-repo
+detail) would not by itself move `v`. It is always exactly one line, including
+the empty-registry case:
+
+```
+no-fleet  no repos registered
+```
 
 ## Exit codes
 
 | Code | Meaning |
 |---|---|
-| 0 | a tile was produced — including a `quiet` or `degraded` one |
-| 1 | vigil could not produce a tile at all (bad flags, unreadable repo path) |
-| 2 | reserved for `--exit-on <state>`: a tile was produced *and* it met or exceeded that state |
+| 0 | a tile was produced — including an `all-quiet`, `no-fleet` or otherwise unremarkable one |
+| 1 | quivive could not produce a tile at all (bad flags, an unreadable *explicit* `--repo`) |
+| 2 | reserved for `--exit-on <status>`: a tile was produced *and* its overall status met or exceeded that one |
+
+An explicit `--repo` that does not resolve is the one real error and exits 1
+— it is not a registry entry, so there is nothing to degrade around. A
+registry entry that fails to resolve, by contrast, degrades to a quiet
+`no-fleet` entry for that one repo rather than failing the whole payload: one
+bad line in `~/.config/quivive/repos` must not take the whole fleet's tile
+down.
 
 Code 2 is what makes [D3](adr/0003-yagni-deferral-register.md) — no
-notifications — an honest deferral rather than a gap: `vigil tile --exit-on dead
-|| notify-send "fleet down"` is the 90% case in one line, using the caller's own
-notifier, which is already configured the way the caller likes.
+notifications in this crate — an honest deferral rather than a gap:
+`quivive tile --exit-on human-needed || notify-send "fleet needs you"` is the
+cheap 90% of an alert, using whatever notifier the caller already has
+configured. `--exit-on` takes one of S8's five status names — the same
+`human-needed`/`active`/`drained`/`all-quiet`/`no-fleet` vocabulary as
+`status` above, not the four-state *agent* machine (`active`/`idle`/`stale`/
+`dead`) those counts are made of; the two vocabularies are easy to confuse
+because both derive from the same evidence, and only one of them is what a
+human waiting on the whole fleet actually wants to threshold on.
 
 ## Changing the contract
 
-`v` is an integer and it moves only for a **breaking** change. Two rules decide
-which kind a change is:
+`v` is an integer and it moves only for a **breaking** change. Two rules
+decide which kind a change is:
 
-- **Additive** — a new field, a new `degraded` reason, a new entry in an array.
-  `v` does not move. Every consumer is required to ignore fields it does not know,
-  and this is the sentence that requires it.
-- **Breaking** — removing a field, renaming one, changing a type, changing the
-  *meaning* of a value, or changing severity order. `v` moves, and the previous
-  shape is documented on this page rather than deleted from it.
+- **Additive** — a new field, a new attention-item `kind`, a new entry in an
+  array. `v` does not move. Every consumer is required to ignore fields it
+  does not know, and this is the sentence that requires it.
+- **Breaking** — removing a field, renaming one, changing a type, changing
+  the *meaning* of a value, or changing severity order. `v` moves, and the
+  previous shape stays documented on this page rather than being deleted
+  from it.
 
-The resume cursor is `.pact/vigil-cursor.json`, and its path is part of this
-contract for one reason: **a consumer is entitled to delete it, and deleting it
-must only ever cost time.** Its contents are not part of the contract and may
-change shape without notice, because it is a cache — see
-[ADR-0001](adr/0001-stream-first-tile.md). `--no-cursor` does the same thing
-without touching the file.
+The two that get misfiled most often, both in the breaking direction: a
+meaning change that looks additive (the same field, the same type, and a
+different number in every consumer — `remaining_ttl` measured from a
+different reference point, say), and severity order (nothing in the schema
+encodes it, so moving it is invisible in a diff, and every renderer's colour
+comes from it).
 
 `mise run tile-goldens` is the gate. A golden diff is not a failure to be
-silenced; it is the prompt to decide which of the two kinds of change you just
-made. Any commit that moves `v` must move this page in the same commit — that is
-a review rule, and the reason it can be one is that a golden diff makes the
-question unmissable.
+silenced; it is the prompt to decide which of the two kinds of change was
+just made — regenerate (`UPDATE_GOLDENS=1 cargo test --test goldens`), read
+the diff, and only then decide about `v` and this page. Regenerating a
+golden to turn a red gate green without reading the diff first is how a
+breaking change ships without anybody deciding to ship it.
 
-The goldens live in `tests/goldens/` and are only possible because a tick is a
-pure function of (ledger, clock, thresholds) —
-[ADR-0001](adr/0001-stream-first-tile.md). Each golden is a frozen ledger plus a
-frozen `at`, so a golden that needs a sleep, a real clock, or a retry is evidence
-that purity has been lost, and the right fix is in the fold, not in the golden.
+The goldens live in `tests/goldens/` and are only possible because a tick is
+a pure function of (evidence, clock, thresholds) —
+[ADR-0001](adr/0001-stream-first-tile.md). Each golden is frozen evidence
+plus a frozen `at`; a golden that needed a sleep, a real clock or a retry
+would be evidence that purity has been lost, and the fix belongs in the fold,
+never in the golden.
+
+`tests/goldens/*.json` in this crate today are a **starting base**, not the
+final set: they exercise the reader/fold side (declines, the forget sweep,
+the cursor invariant) rather than S13's five canonical samples
+(`all-quiet`, `active`, `human-needed`, `drained`, `no-fleet`). The goldens
+bead rewrites them against those five; this page already reflects the shape
+that rewrite will pin, so it needed no further change when that lands.

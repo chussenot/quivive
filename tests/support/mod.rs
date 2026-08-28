@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, TimeDelta, Utc};
 use quivive::reader::{self, Readings};
 use quivive::state::Thresholds;
-use quivive::tile::Tile;
+use quivive::tile::{Payload, RepoEntry};
 use tempfile::TempDir;
 
 /// The frozen clock every fixture and every golden is relative to.
@@ -262,12 +262,28 @@ impl Fixture {
         reader::commit(self.dir.path(), readings);
     }
 
-    /// The tile, with the default thresholds unless overridden.
-    pub fn tile(&self, use_cursor: bool, thresholds: &Thresholds) -> Tile {
-        let readings = self.read(use_cursor);
-        let tile = Tile::build(&readings, "REPO", now(), thresholds);
-        self.commit(&readings);
-        tile
+    /// This fixture's own [`RepoEntry`], with the default thresholds unless
+    /// overridden. A thin wrapper around [`quivive::tile::tick`] rather than a
+    /// second read-and-commit sequence, so the goldens exercise the exact
+    /// function the CLI calls per repo.
+    pub fn entry(&self, use_cursor: bool, thresholds: &Thresholds) -> RepoEntry {
+        quivive::tile::tick(self.dir.path(), now(), thresholds, use_cursor)
+            .expect("a fixture repository is always readable")
+    }
+
+    /// The whole one-shot payload (S11) over just this one repo — what
+    /// `quivive tile --repo <this>` would actually print. `degrade_unreadable`
+    /// is false: a fixture's path is always valid, so a read failure here
+    /// would be a bug in the fixture, not something to paper over.
+    pub fn tile(&self, use_cursor: bool, thresholds: &Thresholds) -> Payload {
+        quivive::tile::build(
+            &[self.dir.path().to_path_buf()],
+            now(),
+            thresholds,
+            use_cursor,
+            false,
+        )
+        .expect("a fixture repository is always readable")
     }
 
     pub fn has_cursor(&self) -> bool {
