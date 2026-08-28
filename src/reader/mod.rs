@@ -9,7 +9,7 @@ pub mod ledger;
 pub mod plan;
 pub mod sidecar;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -40,6 +40,12 @@ pub struct Readings {
     /// has never been planned. Feeds `S8`'s `drained` detection and `S18`'s
     /// gate-order detection downstream — this reader only parses it.
     pub plan: Option<plan::Snapshot>,
+    /// `S18`'s started-bead evidence, folded from the events tail: every id
+    /// an `acquired` row's `bead` field has ever named (`reader::ledger`'s own
+    /// incremental fold, carried across resumed reads by the cursor). Empty
+    /// when nothing has ever been started with `--bead`, which is the normal
+    /// case for a repository not using pact's `--bead` flag.
+    pub started: BTreeSet<String>,
     /// Every row of `.beads/interactions.jsonl` that parsed, oldest first.
     /// Empty when the sidecar is absent or bd's audit export is disabled — see
     /// `reader::sidecar`. What counts as a needs-decision bead (`S17`) is a
@@ -138,6 +144,7 @@ pub fn read(opts: &Options) -> Result<Readings> {
         agents,
         leases: lea.leases,
         plan: pln.snapshot,
+        started: led.started,
         interactions: sid.rows,
         degraded,
         cursor: opts.use_cursor.then_some(led.cursor),
