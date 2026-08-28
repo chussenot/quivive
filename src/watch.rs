@@ -22,29 +22,36 @@
 //! *only* place in this file that starts a subprocess, and it runs strictly
 //! after a tick has already been judged, never as part of judging it.
 //!
-//! **Known gap: `S18`'s `GateOrderViolation` cannot fire from this loop
-//! today.** [`to_snapshot`] always sets `plan: None` — no reader anywhere in
-//! this crate yet folds `.pact/plan.json`'s wave/gate shape together with
-//! the events tail's "what started, in which wave" evidence into
-//! [`state::PlanSnapshot`], and inventing that fold here would duplicate
-//! whichever bead builds it for real (`why` or `tile`) rather than reuse it.
-//! `state::gate_order_violations` only ever sees `snapshot.plan`, so with it
-//! always `None` the violation simply never appears in `attention` — quietly
-//! correct, not silently wrong. The formatting and S20 follow-up for
-//! `GateOrderViolation` are implemented and tested against hand-built
-//! fixtures below regardless, ready the moment a real plan reader lands.
+//! **`S18`'s `GateOrderViolation` now fires from this loop (quivive-374).**
+//! [`to_snapshot`] maps `reader::Readings::plan` — pact's `.pact/plan.json`
+//! snapshot — together with `reader::Readings::started` — the events tail's
+//! per-bead "an `acquired` row named this id" evidence, folded incrementally
+//! by `reader::ledger::read` and carried across resumed reads by the cursor,
+//! the same way agent evidence already is — into [`state::PlanSnapshot`] via
+//! this file's own [`build_plan_snapshot`]. That function's shape mirrors
+//! `why.rs`'s `build_plan_snapshot`/`gate_closed` rather than sharing code
+//! with them: this wave's bead keeps `why.rs` untouched, so the two
+//! near-identical derivations stand side by side for now. Lifting both (and
+//! `tile.rs`'s own third copy, which reads "started" from bd's sidecar
+//! status instead of the ledger — see the note below) into one
+//! reader-owned helper is a real follow-up, not done here.
 //!
-//! That same gap decides S20's follow-up for `GateOrderViolation`: the
-//! payload [`state::AttentionItem::GateOrderViolation`] carries has no
-//! `events.jsonl` line number (nothing in `reader::Readings` exposes one for
-//! the ledger tail — only the sidecar's rows carry a line, via
-//! `reader::sidecar::Row::line`), so `recount explain --event-line N` is not
-//! answerable here without leasing and extending the ledger reader itself,
-//! which is out of this bead's scope. `pact audit --check gate-order` — the
-//! family's own auditor for exactly this condition — stands in instead. See
-//! [`format_event`]'s `GateOrderViolation` arm.
+//! Because `snapshot_cache` in [`tick_repo`] stores the whole
+//! [`state::RepoSnapshot`] [`to_snapshot`] builds, `plan` and its started ids
+//! ride along into the cache for free — an unchanged pass (S5) that
+//! re-assesses the cached snapshot at a new clock (quivive-trx) sees the same
+//! plan it would have re-read, so a gate-order violation does not vanish on a
+//! quiet pass.
+//!
+//! S20's follow-up for `GateOrderViolation` still has no `events.jsonl` line
+//! number to cite: `reader::Readings::started` is deliberately a bare set of
+//! ids (membership is all `state::gate_order_violations` needs), not a map to
+//! a line, so `recount explain --event-line N` remains unanswerable here.
+//! `pact audit --check gate-order` — the family's own auditor for exactly
+//! this condition — stands in instead. See [`format_event`]'s
+//! `GateOrderViolation` arm.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
@@ -344,9 +351,72 @@ fn needs_decision_from(rows: &[sidecar::Row]) -> Vec<String> {
         .collect()
 }
 
+/// Whether the sidecar shows `gate_id` as closed: the newest `field="status"`
+/// row for that bead id has `new_value == "closed"`. `rows` is oldest-first
+/// (`reader::sidecar::read`'s own order), so the newest is the last match.
+///
+/// Mirrors `why.rs`'s `gate_closed` exactly — see the module doc for why this
+/// wave keeps the two copies separate rather than sharing one.
+fn gate_closed(rows: &[sidecar::Row], gate_id: &str) -> bool {
+    rows.iter()
+        .rfind(|r| r.issue_id == gate_id && r.field.as_deref() == Some("status"))
+        .is_some_and(|r| r.new_value.as_deref() == Some("closed"))
+}
+
+/// `.pact/plan.json` plus the ledger's started-bead evidence, narrowed to
+/// `state::PlanSnapshot`'s shape (`S18`). One `WaveSnapshot` per distinct
+/// wave number the plan declares; a wave with no gates and nothing started
+/// still gets an entry so a later gate declared in it is not silently absent
+/// from the judgment.
+///
+/// Mirrors `why.rs`'s `build_plan_snapshot` exactly, but keyed off
+/// `reader::Readings::started` (the ledger's own incremental fold) rather
+/// than a fresh scan of `events.jsonl` — see the module doc.
+fn build_plan_snapshot(
+    plan: &reader::plan::Snapshot,
+    sidecar_rows: &[sidecar::Row],
+    started: &BTreeSet<String>,
+) -> state::PlanSnapshot {
+    let mut wave_numbers: Vec<i64> = plan.waves.values().copied().collect();
+    wave_numbers.sort_unstable();
+    wave_numbers.dedup();
+
+    let waves = wave_numbers
+        .into_iter()
+        .map(|w| {
+            let gates = plan
+                .gates
+                .iter()
+                .filter(|id| plan.waves.get(id.as_str()) == Some(&w))
+                .map(|id| state::GateSnapshot {
+                    id: id.clone(),
+                    closed: gate_closed(sidecar_rows, id),
+                })
+                .collect();
+            let started_here = plan
+                .waves
+                .iter()
+                .filter(|&(_, &wave)| wave == w)
+                .filter(|(id, _)| started.contains(id.as_str()))
+                .map(|(id, _)| id.clone())
+                .collect();
+            state::WaveSnapshot {
+                // Waves are declared as small non-negative integers in every
+                // real plan; a plan somehow declaring a negative one clamps
+                // to 0 rather than panicking on the cast — a malformed plan
+                // is a reason to degrade, never a reason to crash `watch`.
+                wave: w.max(0) as u32,
+                gates,
+                started: started_here,
+            }
+        })
+        .collect();
+
+    state::PlanSnapshot { waves }
+}
+
 /// Build the pure-judgment [`RepoSnapshot`] this tick's `state::assess`
-/// needs, from what [`reader::read`] actually gathered. See the module doc
-/// for why `plan` is always `None` here.
+/// needs, from what [`reader::read`] actually gathered.
 fn to_snapshot(readings: &reader::Readings, repo_root: &Path) -> RepoSnapshot {
     let leases = readings
         .leases
@@ -359,10 +429,15 @@ fn to_snapshot(readings: &reader::Readings, repo_root: &Path) -> RepoSnapshot {
         })
         .collect();
 
+    let plan = readings
+        .plan
+        .as_ref()
+        .map(|p| build_plan_snapshot(p, &readings.interactions, &readings.started));
+
     RepoSnapshot {
         agents: readings.agents.clone(),
         leases,
-        plan: None,
+        plan,
         needs_decision: needs_decision_from(&readings.interactions),
         // `.pact/` existing at all is what separates S8's `all-quiet` from
         // `no-fleet`; `reader::read` never reports this directly (it reports
@@ -888,7 +963,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn to_snapshot_maps_leases_agents_and_pact_presence_and_leaves_plan_none() {
+    fn to_snapshot_maps_leases_agents_and_pact_presence_with_no_plan_file() {
         let dir = tempfile::tempdir().unwrap();
         let pact = dir.path().join(".pact");
         std::fs::create_dir_all(pact.join("leases")).unwrap();
@@ -909,11 +984,54 @@ mod tests {
         assert!(snapshot.pact_present);
         assert!(
             snapshot.plan.is_none(),
-            "no plan reader exists yet — see the module doc"
+            "no .pact/plan.json was written by this fixture, so there is nothing to map"
         );
         assert_eq!(snapshot.leases.len(), 1);
         assert_eq!(snapshot.leases[0].agent, "agent-1");
         assert_eq!(snapshot.leases[0].path, "src/a.rs");
+    }
+
+    #[test]
+    fn to_snapshot_maps_a_present_plan_and_its_started_ids_quivive_374() {
+        let dir = tempfile::tempdir().unwrap();
+        let pact = dir.path().join(".pact");
+        std::fs::create_dir_all(&pact).unwrap();
+        std::fs::write(
+            pact.join("plan.json"),
+            r#"{"at":"2026-08-28T00:00:00Z",
+               "edges":{"gate-1":[],"bead-9":["gate-1"]},
+               "waves":{"gate-1":1,"bead-9":2},
+               "gates":["gate-1"]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            pact.join("events.jsonl"),
+            "{\"at\":\"2026-08-28T10:00:00Z\",\"agent\":\"agent-1\",\"kind\":\"acquired\",\
+             \"path\":\"x\",\"bead\":\"bead-9\"}\n",
+        )
+        .unwrap();
+
+        let readings = reader::read(&reader::Options {
+            repo_root: dir.path().to_path_buf(),
+            use_cursor: false,
+        })
+        .unwrap();
+        assert_eq!(readings.started, ["bead-9".to_string()].into());
+
+        let snapshot = to_snapshot(&readings, dir.path());
+        let plan = snapshot.plan.expect("a real plan.json must map to Some");
+        let wave2 = plan
+            .waves
+            .iter()
+            .find(|w| w.wave == 2)
+            .expect("wave 2 must appear even though it declares no gate");
+        assert_eq!(wave2.started, vec!["bead-9".to_string()]);
+        let wave1 = plan.waves.iter().find(|w| w.wave == 1).unwrap();
+        assert_eq!(wave1.gates.len(), 1);
+        assert!(
+            !wave1.gates[0].closed,
+            "no sidecar row closed gate-1, so it must read as still open"
+        );
     }
 
     #[test]
@@ -1128,5 +1246,166 @@ mod tests {
         );
         assert_eq!(sent[0].command, "bd ready");
         assert!(sent[0].body.contains("the fleet drained"));
+    }
+
+    // -----------------------------------------------------------------------
+    // quivive-374: S18's GateOrderViolation, fired from watch's own live
+    // loop rather than a hand-built RepoAssessment. A real `.pact/plan.json`
+    // declares a wave-1 gate that never closes and a wave-2 bead; a real
+    // `.pact/events.jsonl` gains an `acquired` row naming that wave-2 bead
+    // between two passes over `read_and_assess` — the read half of the same
+    // live loop `tick_repo` dispatches into, called directly here (as the
+    // sibling `tick_repo`-driven tests above call `tick_repo`) so the disk
+    // write's mtime need not race S5's separate prune gate, which this bead
+    // does not touch. Injected clock throughout; nothing here sleeps.
+    // -----------------------------------------------------------------------
+
+    fn repo_with_an_open_wave1_gate_and_a_wave2_bead() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let pact = dir.path().join(".pact");
+        std::fs::create_dir_all(&pact).unwrap();
+        std::fs::write(
+            pact.join("plan.json"),
+            r#"{"at":"2026-08-28T00:00:00Z",
+               "edges":{"gate-1":[],"bead-9":["gate-1"]},
+               "waves":{"gate-1":1,"bead-9":2},
+               "gates":["gate-1"]}"#,
+        )
+        .unwrap();
+        // No acquired row yet — the fixture starts with nothing started, so
+        // the first pass has no violation to report.
+        std::fs::write(pact.join("events.jsonl"), "").unwrap();
+        dir
+    }
+
+    #[test]
+    fn watch_live_loop_fires_gate_order_violation_exactly_once_and_it_survives_the_cache() {
+        let dir = repo_with_an_open_wave1_gate_and_a_wave2_bead();
+        let repo = dir.path().to_path_buf();
+
+        let thresholds = Thresholds::default();
+        let notifier = RecordingNotifier::default();
+        let mut debouncer = Debouncer::new(Duration::from_secs(300));
+        let mut prune_watermark = HashMap::new();
+        let mut snapshot_cache = HashMap::new();
+        let mut prev = HashMap::new();
+
+        // Pass 1: plan present, gate-1 open, nothing started yet — no
+        // violation, and the first pass over any repo never notifies
+        // regardless (no `prev` to diff against).
+        read_and_assess(
+            &repo,
+            clock(),
+            &thresholds,
+            &mut prune_watermark,
+            &mut snapshot_cache,
+            &mut prev,
+            &mut debouncer,
+            &notifier,
+        )
+        .unwrap();
+        assert!(notifier.sent.borrow().is_empty());
+        assert!(
+            prev.get(&repo)
+                .unwrap()
+                .attention
+                .iter()
+                .all(|a| !matches!(a, AttentionItem::GateOrderViolation { .. })),
+            "nothing has started yet, so pass 1 must not judge a violation"
+        );
+
+        // Between passes: a real `acquired` row lands, naming the wave-2
+        // bead — exactly the events-tail evidence S18 quotes.
+        std::fs::write(
+            dir.path().join(".pact").join("events.jsonl"),
+            "{\"at\":\"2026-08-28T10:00:00Z\",\"agent\":\"agent-1\",\"kind\":\"acquired\",\
+             \"path\":\"x\",\"bead\":\"bead-9\"}\n",
+        )
+        .unwrap();
+
+        // Pass 2: the same live-loop read path, over a later injected clock
+        // (never a real sleep) — bead-9 is now started while gate-1's wave
+        // is still open, so the violation newly appears (S14's "becomes
+        // true") and must notify exactly once.
+        let t1 = clock() + chrono::TimeDelta::seconds(60);
+        read_and_assess(
+            &repo,
+            t1,
+            &thresholds,
+            &mut prune_watermark,
+            &mut snapshot_cache,
+            &mut prev,
+            &mut debouncer,
+            &notifier,
+        )
+        .unwrap();
+
+        let sent = notifier.sent.borrow();
+        assert_eq!(
+            sent.len(),
+            1,
+            "the gate-order violation must notify exactly once, not zero and not twice: {sent:?}"
+        );
+        assert_eq!(
+            sent[0].title,
+            format!("quivive: {} — gate-order violation", repo.display())
+        );
+        assert_eq!(
+            sent[0].body,
+            "bead-9 started in wave 2 before gate gate-1 (wave 1) closed"
+        );
+        assert_eq!(sent[0].command, "pact audit --check gate-order");
+        drop(sent);
+
+        // quivive-trx's own concern, checked directly: the plan and its
+        // started ids must have ridden into `snapshot_cache` along with the
+        // rest of the snapshot pass 2 built, so a later pruned pass that
+        // reuses this cached snapshot (rather than re-reading) still sees
+        // the violation instead of it quietly vanishing.
+        let cached = snapshot_cache
+            .get(&repo)
+            .expect("read_and_assess must cache the snapshot it built");
+        let cached_plan = cached
+            .plan
+            .as_ref()
+            .expect("the plan must be cached, not dropped on the read path");
+        let wave2 = cached_plan
+            .waves
+            .iter()
+            .find(|w| w.wave == 2)
+            .expect("wave 2 must be present in the cached plan");
+        assert_eq!(
+            wave2.started,
+            vec!["bead-9".to_string()],
+            "the cached snapshot must carry the started id, not just the live one just assessed"
+        );
+        let reassessed = state::assess(cached, t1 + chrono::TimeDelta::seconds(60), &thresholds);
+        assert!(
+            reassessed
+                .attention
+                .iter()
+                .any(|a| matches!(a, AttentionItem::GateOrderViolation { .. })),
+            "re-assessing the CACHED snapshot at a later clock must still see the violation"
+        );
+
+        // Pass 3: nothing changed on disk or in the plan — the violation is
+        // still true but did not newly become true, so S14 must not re-fire.
+        let t2 = t1 + chrono::TimeDelta::seconds(60);
+        read_and_assess(
+            &repo,
+            t2,
+            &thresholds,
+            &mut prune_watermark,
+            &mut snapshot_cache,
+            &mut prev,
+            &mut debouncer,
+            &notifier,
+        )
+        .unwrap();
+        assert_eq!(
+            notifier.sent.borrow().len(),
+            1,
+            "a standing violation must not notify again while it stays true"
+        );
     }
 }
