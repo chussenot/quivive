@@ -14,8 +14,12 @@ updates:
       prefix: "build"
       include: scope
 
-  # Cargo, for when the crate lands. Harmless until then: with no Cargo.toml,
-  # dependabot finds nothing to update rather than erroring.
+  # Cargo. This entry predates the crate, and the comment it carried — "with no
+  # Cargo.toml, dependabot finds nothing to update rather than erroring" — was a
+  # claim written unverified and falsified by the first real run: the 08:41 job
+  # aborted with dependency_file_not_found. The crate exists now, so the entry is
+  # simply correct; the wrong sentence is recorded in
+  # docs/studies/conventions-run.md rather than silently deleted.
   - package-ecosystem: cargo
     directory: "/"
     schedule:

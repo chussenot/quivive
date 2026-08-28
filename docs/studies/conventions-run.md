@@ -319,6 +319,21 @@ runner has both 1.94.1 and 1.98.0 available and the build used **1.94.1** — an
 bench correctly `ignored` rather than silently skipped. A green step is not by
 itself evidence that the step did the work; the log is.
 
+### A written claim, falsified by the first real run
+
+Not a check passing for the wrong reason — the inverse defect, and cheaper to
+make. `.github/dependabot.yml`'s cargo entry shipped with a comment asserting
+that, with no `Cargo.toml` in the repository, dependabot "finds nothing to update
+rather than erroring". Nobody had checked. The first scheduled cargo job aborted
+with `dependency_file_not_found: /Cargo.toml not found` and reported an error on
+the repository — exactly the failure the comment promised away.
+
+Self-healing in this case, because the crate landed hours later and the next run
+succeeds. Recorded anyway, because it is the conventions' own rule — *never write
+a claim you have not checked* — broken in the file where breaking it was cheapest
+to avoid: the claim was testable by reading dependabot's documented behaviour, or
+by waiting one scheduled run before asserting anything.
+
 ## The six times a check passed for the wrong reason
 
 Collected, because the pattern is worth more than the instances:
