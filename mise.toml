@@ -60,6 +60,11 @@ description = "Soak-test vigil against a live multi-agent fleet writing a real l
 # identical tiles. That is the invariant of
 # docs/adr/0001-stream-first-tile.md stated as an experiment — a cursor is
 # correct only if throwing it away changes nothing but the time taken.
+#
+# `scripts/fleet-sim.sh` does not exist yet and lands with the crate. That is not
+# a dangling reference in disguise: with-crate.sh skips while there is no
+# Cargo.toml, and the moment there is one this task fails loudly with
+# "No such file" — which is exactly when somebody should be writing it.
 run = "scripts/with-crate.sh scripts/fleet-sim.sh"
 
 [tasks.fmt]

@@ -46,10 +46,13 @@ jobs:
       # mise's own version is left to the action. Pinning it would be a third
       # thing to keep current for no promise anyone made; the pin that matters is
       # the compiler's.
+      #
+      # No `with:` block: `install` and `cache` both default to true at this SHA,
+      # which is what we want, and restating a default is a line that can silently
+      # stop matching it. An unknown or renamed input is not an error in Actions —
+      # it is simply ignored — so the fewer inputs named here, the fewer ways this
+      # step can rot without saying so.
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
-        with:
-          install: true
-          cache: true
 
       # `mise run check` is fmt-check, lint, lint-scripts, test and check-docs,
       # serially. Serially matters: the legs all reach one binary through one

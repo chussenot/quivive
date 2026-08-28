@@ -127,6 +127,41 @@ than the defect it prevents. It is listed among the ungated rules in
 [docs/conventions.md](../conventions.md#what-is-not-gated), and re-running it is a
 manual step when a diagram is added.
 
+## Experiment 3 — does the commit gate actually gate
+
+**Question.** `cog check` is configured and wired into CI on every PR. Does it
+pass on this repository's own history, and does it fail on the defect it exists to
+catch — a commit type cocogitto silently drops from the generated changelog?
+
+**Method.** cocogitto 7.0.0. `cog check` over all history, then the
+`BASE..HEAD` range form CI actually invokes, then a negative control: a throwaway
+clone with one commit subject cocogitto cannot parse.
+
+**Result.** Both positive runs report `No errored commits`. The negative control
+reports `Commit type 'chora' not allowed` and exits 1.
+
+**The finding was in the configuration, and it was a hard failure.** The first
+`cog check` never looked at a commit at all:
+
+```
+Error: failed to parse config
+	cause unknown field `packages`, expected one of ... `monorepo`, `scopes`
+```
+
+`packages` was renamed to `monorepo` in cocogitto 7, and an unknown field fails
+config parsing outright. The table was **empty** — it set nothing whatsoever. It
+was there because it is in the config shape the sibling repositories use, which
+predates that release. Three more empty tables went with it; a gate that exits 1
+before reading a commit is not a stricter gate, it is an absent one, and every PR
+would have been red for a reason unrelated to its commits.
+
+**And the contamination from Experiment 1 recurred here, immediately.** The first
+negative control "passed" — exit 1, as hoped — while actually failing on the
+config error, because the throwaway clone was taken before the config fix was
+committed. Twice in one run, the same mistake: **an exit code is not evidence
+about the thing you are testing.** Reading the message rather than the status is
+what caught it both times.
+
 ## What this run leaves unproven
 
 Said plainly, because a study that only reports its successes is an advertisement:
@@ -138,8 +173,13 @@ Said plainly, because a study that only reports its successes is an advertisemen
   `mise run fleet` is written to measure it and has never run.
 - **The per-tick ceilings** in [docs/spec.md](../spec.md#the-tick) are targets, not
   measurements. No number in this repository came from a profiler.
-- **`cog check`** is configured and wired into CI. Whether it passes on this
-  repository's own history is checked at the end of this run, not designed in.
+- **`mise run lint-scripts`.** shellcheck could not be obtained in the
+  environment this run happened in — the binary download returns 403 — so the two
+  scripts were reviewed by hand against the warning-severity rules and are
+  otherwise unverified. It is a required leg of `mise run check`, so the first CI
+  run is its first real execution. If it is red, that is this note being cashed.
+- **`mise run check` as a whole.** mise itself was not installed here. Each leg
+  was invoked directly; the composition was not.
 - **The two-layer changelog** has no release to demonstrate it on.
 
 Each of those is a thing to come back and fill in. The first release's Notes
