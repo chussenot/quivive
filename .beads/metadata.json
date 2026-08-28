@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "proxied-server",
+  "dolt_database": "quivive",
+  "project_id": "eb1cf0c2-44fa-4bb0-a427-70b11f1881a5"
+}
