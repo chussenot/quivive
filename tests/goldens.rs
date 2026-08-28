@@ -13,87 +13,142 @@
 //! gate green is how a breaking change ships without anybody deciding to ship it.
 //!
 //! Every golden is computed against the frozen clock in `support::NOW`, which is
-//! what makes a tile a fixed string at all. A golden that needed a `sleep`, a real
-//! clock or a retry would be evidence that purity has been lost.
+//! what makes a payload a fixed string at all. A golden that needed a `sleep`, a
+//! real clock or a retry would be evidence that purity has been lost.
+//!
+//! **This is a starting base, not the final set.** `quivive-jx3` rewrites these
+//! against the five S13 samples (`all-quiet`, `active`, `human-needed`,
+//! `drained`, `no-fleet`) in both repos. The scenarios here exercise the same
+//! ground from the reader/fold side — declines, the forget sweep, the ledger's
+//! purity invariant — and are kept intentionally small so that bead has a clean
+//! base to build on rather than a second, competing set of samples to reconcile.
+//!
+//! **Path normalization**: a [`quivive::tile::RepoEntry`]'s `name` and `path`
+//! come from the fixture's own tempdir, which is different on every run — so
+//! [`assert_golden`] replaces the fixture's real path (and its basename) with
+//! fixed placeholders before comparing. Nothing else in the payload is ever
+//! rewritten.
 
 mod support;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use quivive::state::Thresholds;
-use quivive::tile::Tile;
+use quivive::tile::Payload;
 use support::Fixture;
 
 fn golden_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/goldens")
 }
 
-/// Compare, or rewrite when `UPDATE_GOLDENS=1`.
-fn assert_golden(name: &str, tile: &Tile) {
-    let json = serde_json::to_string_pretty(tile).unwrap() + "\n";
-    let text = tile.text().to_string() + "\n";
-    for (ext, actual) in [("json", json), ("txt", text)] {
-        let path = golden_dir().join(format!("{name}.{ext}"));
-        if std::env::var("UPDATE_GOLDENS").is_ok() {
-            std::fs::create_dir_all(golden_dir()).unwrap();
-            std::fs::write(&path, &actual).unwrap();
-            continue;
-        }
-        let expected = std::fs::read_to_string(&path).unwrap_or_else(|_| {
-            panic!(
-                "no golden at {}. If this scenario is new, run:\n    \
-                 UPDATE_GOLDENS=1 cargo test --test goldens\n\
-                 then read the diff before committing it.",
-                path.display()
-            )
-        });
-        assert_eq!(
-            expected, actual,
-            "golden {name}.{ext} differs.\n\n\
-             This is a question, not a failure: did the CONTRACT change (regenerate, \
-             update docs/tile-contract.md, decide about `v`) or did the FOLD break \
-             (the golden is right)?\n"
-        );
+/// Replace this fixture's volatile tempdir path (and its basename) with fixed
+/// placeholders, longest string first so the basename substitution cannot
+/// corrupt a path substitution already made.
+fn normalize(json: &str, root: &Path) -> String {
+    let canon = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let path = canon.display().to_string();
+    let name = canon
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let mut out = json.replace(&path, "REPO_PATH");
+    if !name.is_empty() {
+        out = out.replace(&name, "REPO_NAME");
     }
+    out
 }
 
-/// Eight agents across all four states, two leases, one of them expired under a
-/// dead holder. The tile's whole surface in one scenario.
-fn mixed() -> Fixture {
+/// Compare, or rewrite when `UPDATE_GOLDENS=1`.
+fn assert_golden(name: &str, root: &Path, payload: &Payload) {
+    let json = normalize(&serde_json::to_string_pretty(payload).unwrap(), root) + "\n";
+    let path = golden_dir().join(format!("{name}.json"));
+    if std::env::var("UPDATE_GOLDENS").is_ok() {
+        std::fs::create_dir_all(golden_dir()).unwrap();
+        std::fs::write(&path, &json).unwrap();
+        return;
+    }
+    let expected = std::fs::read_to_string(&path).unwrap_or_else(|_| {
+        panic!(
+            "no golden at {}. If this scenario is new, run:\n    \
+             UPDATE_GOLDENS=1 cargo test --test goldens\n\
+             then read the diff before committing it.",
+            path.display()
+        )
+    });
+    assert_eq!(
+        expected, json,
+        "golden {name}.json differs.\n\n\
+         This is a question, not a failure: did the CONTRACT change (regenerate, \
+         update docs/tile-contract.md, decide about `v`) or did the FOLD break \
+         (the golden is right)?\n"
+    );
+}
+
+/// Two active, one idle, one stale (holding a live lease), one dead (holding
+/// nothing) — a working fleet with nothing needing a human, because S16 only
+/// fires for a DEAD holder and this dead agent holds no lease.
+fn active_fleet() -> Fixture {
     let f = Fixture::new();
     f.event("agent-1", "acquired", 5); // ACTIVE
     f.event("agent-2", "renewed", 30); // ACTIVE
-    f.event("agent-3", "acquired", 412); // STALE, and holds a lease
-    f.event("agent-4", "released", 120); // IDLE
-    f.event("agent-5", "stolen", 250); // IDLE
-    f.event("agent-6", "acquired", 2400); // DEAD
-    f.event("agent-7", "refused", 59); // ACTIVE (boundary: still active)
-    f.event("agent-8", "acquired", 60); // IDLE (boundary: just tipped)
-    // Held by a STALE agent and already past its TTL: the actionable case.
-    f.lease("agent-3", "src/fold.rs", 412, 300, false);
-    // Held by an ACTIVE agent and live: the system working, so NOT reported.
-    f.lease("agent-1", "src/tile.rs", 5, 900, false);
+    f.event("agent-3", "acquired", 120); // IDLE, and holds a live lease
+    f.event("agent-4", "acquired", 412); // STALE
+    f.event("agent-6", "acquired", 2400); // DEAD, holds nothing
+    f.lease("agent-3", "src/tile.rs", 120, 900, false);
     f
 }
 
 #[test]
-fn mixed_fleet() {
-    assert_golden("mixed", &mixed().tile(true, &Thresholds::default()));
+fn active_fleet_has_no_attention_items() {
+    let f = active_fleet();
+    let payload = f.tile(true, &Thresholds::default());
+    assert_eq!(payload.status, quivive::state::RepoStatus::Active);
+    assert!(payload.repos[0].attention.is_empty());
+    assert_golden("active_fleet", f.root(), &payload);
 }
 
 #[test]
-fn quiet_repository() {
-    // A pact-initialised repository nobody has worked in. `worst` is `quiet`,
-    // which is not a State: it is the absence of agents rather than a state one
-    // could be in, so it stays out of the severity ordering.
-    assert_golden("quiet", &Fixture::new().tile(true, &Thresholds::default()));
+fn all_quiet_repository() {
+    // A pact-initialised repository nobody has worked in.
+    let f = Fixture::new();
+    let payload = f.tile(true, &Thresholds::default());
+    assert_eq!(payload.status, quivive::state::RepoStatus::AllQuiet);
+    assert_golden("all_quiet", f.root(), &payload);
 }
 
 #[test]
-fn no_pact_at_all() {
-    // Degraded, not an error, and the one case where the counts would be a lie:
-    // `0A 0I 0S 0D` says "nothing is running" when the truth is "I cannot see".
-    assert_golden("bare", &Fixture::bare().tile(true, &Thresholds::default()));
+fn no_fleet_bare() {
+    // No `.pact/` at all — a normal repository, not a broken one.
+    let f = Fixture::bare();
+    let payload = f.tile(true, &Thresholds::default());
+    assert_eq!(payload.status, quivive::state::RepoStatus::NoFleet);
+    assert_golden("no_fleet_bare", f.root(), &payload);
+}
+
+#[test]
+fn human_needed_dead_holder() {
+    // S16, verbatim: a DEAD agent holds paths. This is the one case a `STALE`
+    // holder does NOT produce (see `active_fleet` above) — S16 names DEAD only.
+    let f = Fixture::new();
+    f.event("agent-1", "acquired", 5); // ACTIVE, for contrast
+    f.event("ghost", "acquired", 2400); // DEAD
+    f.lease("ghost", "src/fold.rs", 2400, 300, false);
+    let payload = f.tile(true, &Thresholds::default());
+    assert_eq!(payload.status, quivive::state::RepoStatus::HumanNeeded);
+    assert_eq!(payload.repos[0].attention.len(), 1);
+    assert_golden("human_needed_dead_holder", f.root(), &payload);
+}
+
+#[test]
+fn drained_fleet() {
+    // A plan exists, and once had a live agent, but none remains: fleet
+    // evidence without anybody currently working — S8's `drained`.
+    let f = Fixture::new();
+    f.event("done-agent", "released", 100_000); // long dead, holds nothing
+    f.plan(&[("proj-1", &[])], &[("proj-1", 0)], &[]);
+    let payload = f.tile(true, &Thresholds::default());
+    assert_eq!(payload.status, quivive::state::RepoStatus::Drained);
+    assert_golden("drained_fleet", f.root(), &payload);
 }
 
 #[test]
@@ -105,42 +160,57 @@ fn damaged_lines_are_counted_not_fatal() {
     f.raw(r#"{"at":"not a timestamp","agent":"a","kind":"acquired"}"#);
     f.raw(""); // a blank line is NOT damage; pact's rewrite can leave one
     f.lease_staging_file("half-written.tmp"); // nor is pact's staging sibling
-    assert_golden("declines", &f.tile(true, &Thresholds::default()));
+    let payload = f.tile(true, &Thresholds::default());
+    assert_eq!(
+        payload.repos[0].agents.active, 1,
+        "the good line still folds"
+    );
+    assert_golden("declines", f.root(), &payload);
 }
 
 #[test]
 fn an_expired_row_does_not_resurrect_its_agent() {
-    // pact writes `expired` under the name of the holder whose claim ENDED — the
-    // sweeper wrote the row, and the named agent by definition did nothing. Same
-    // for `displaced`. Counting either as evidence would resurrect exactly the
-    // agent that just went quiet, which is the most misleading thing vigil could
-    // say. This golden is that rule.
+    // pact writes `expired` under the name of the holder whose claim ENDED —
+    // the sweeper wrote the row, and the named agent by definition did
+    // nothing. Same for `displaced`. Counting either as evidence would
+    // resurrect exactly the agent that just went quiet, which is the most
+    // misleading thing quivive could say. This golden is that rule.
     let f = Fixture::new();
     f.event("ghost", "acquired", 3000);
     f.event("ghost", "expired", 1); // one second ago, and must not count
     f.event("ghost-2", "acquired", 3000);
     f.event("ghost-2", "displaced", 1); // likewise
     f.event("live", "stolen", 1); // the agent that DID act: counts
-    assert_golden("expired_kinds", &f.tile(true, &Thresholds::default()));
+    let payload = f.tile(true, &Thresholds::default());
+    assert_eq!(payload.repos[0].agents.active, 1, "only `live` counts");
+    assert_golden("expired_kinds", f.root(), &payload);
 }
 
 #[test]
 fn forgetting_spares_an_agent_that_is_blocking_a_lease() {
-    // The sweep exists so a week-old repository does not render forty dead names.
-    // But an agent whose expired claim is blocking somebody is the single most
-    // actionable thing in the tile, so it is never swept.
+    // The sweep exists so a week-old repository does not carry forty dead
+    // names in its counts forever. But an agent whose expired claim is
+    // blocking somebody is the single most actionable thing in the tile, so
+    // it is never swept.
     let f = Fixture::new();
     f.event("long-gone", "released", 100_000);
     f.event("long-gone-but-holding", "acquired", 100_000);
     f.lease("long-gone-but-holding", "src/state.rs", 100_000, 900, false);
-    assert_golden("forget", &f.tile(true, &Thresholds::default()));
+    let payload = f.tile(true, &Thresholds::default());
+    // `long-gone` is forgotten (quiet past `forget`, holds nothing);
+    // `long-gone-but-holding` survives as the fleet's one DEAD count and
+    // produces the attention item S16 asks for.
+    assert_eq!(payload.repos[0].agents.dead, 1);
+    assert_eq!(payload.status, quivive::state::RepoStatus::HumanNeeded);
+    assert_golden("forget", f.root(), &payload);
 }
 
 // ---------------------------------------------------------------------------
 // The invariant. Not a golden — a property, and the load-bearing one.
 // ---------------------------------------------------------------------------
 
-/// **Deleting the cursor and re-reading must produce a byte-identical tile.**
+/// **Deleting the cursor and re-reading must produce a byte-identical
+/// payload.**
 ///
 /// `docs/adr/0001-stream-first-tile.md`. Everything else in the crate is in
 /// service of this sentence, and the reason it is asserted over every scenario
@@ -150,9 +220,9 @@ fn forgetting_spares_an_agent_that_is_blocking_a_lease() {
 fn a_cursor_is_correct_to_throw_away() {
     let thresholds = Thresholds::default();
     let scenarios: Vec<(&str, Fixture)> = vec![
-        ("mixed", mixed()),
-        ("quiet", Fixture::new()),
-        ("bare", Fixture::bare()),
+        ("active_fleet", active_fleet()),
+        ("all_quiet", Fixture::new()),
+        ("no_fleet_bare", Fixture::bare()),
     ];
     for (name, f) in scenarios {
         let cold = serde_json::to_string_pretty(&f.tile(true, &thresholds)).unwrap();
@@ -181,19 +251,19 @@ fn a_tick_landing_mid_append_does_not_consume_the_half_line() {
     f.event("agent-1", "acquired", 10);
     f.partial(r#"{"at":"2026-08-28T08:59:59Z","agent":"agent-2","kind":"acq"#);
 
-    let mid = f.tile(true, &thresholds);
-    assert_eq!(mid.fleet.total, 1, "the half line must not be counted");
+    let mid = f.entry(true, &thresholds);
+    assert_eq!(mid.agents.active, 1, "the half line must not be counted");
 
     // Now the writer finishes the line. The next tick must see agent-2.
     f.raw(r#"uired","path":"src/x.rs"}"#);
-    let after = f.tile(true, &thresholds);
+    let after = f.entry(true, &thresholds);
     assert_eq!(
-        after.fleet.total, 2,
+        after.agents.active, 2,
         "the completed line must be picked up by the resumed read, not skipped"
     );
     assert_eq!(
         serde_json::to_string(&after).unwrap(),
-        serde_json::to_string(&f.tile(false, &thresholds)).unwrap(),
+        serde_json::to_string(&f.entry(false, &thresholds)).unwrap(),
         "a resumed read across a completed partial line must match a cold one"
     );
 }
@@ -209,8 +279,8 @@ fn a_rewritten_ledger_falls_back_to_a_full_re_read() {
     for i in 0..40 {
         f.event(&format!("old-{i}"), "acquired", 10);
     }
-    let before = f.tile(true, &thresholds);
-    assert_eq!(before.fleet.total, 40);
+    let before = f.entry(true, &thresholds);
+    assert_eq!(before.agents.active, 40);
 
     // Rewrite to a SHORTER set, then grow it back past the old offset.
     f.rewrite(&[r#"{"at":"2026-08-28T08:59:55Z","agent":"kept","kind":"acquired"}"#]);
@@ -227,18 +297,14 @@ fn a_rewritten_ledger_falls_back_to_a_full_re_read() {
         "a rewritten ledger must force a cold re-read"
     );
 
-    let after = f.tile(true, &thresholds);
-    let cold = f.tile(false, &thresholds);
+    let after = f.entry(true, &thresholds);
+    let cold = f.entry(false, &thresholds);
     assert_eq!(
         serde_json::to_string(&after).unwrap(),
         serde_json::to_string(&cold).unwrap(),
         "a rewrite that grew back past the cursor must force a cold re-read"
     );
-    assert_eq!(after.fleet.total, 61, "kept + 60 new");
-    assert!(
-        !after.agents.iter().any(|a| a.id.starts_with("old-")),
-        "an agent the rewrite dropped must not survive in the accumulator"
-    );
+    assert_eq!(after.agents.active, 61, "kept + 60 new");
 }
 
 #[test]
@@ -250,7 +316,7 @@ fn an_idle_tick_keeps_the_cursor_usable() {
     let thresholds = Thresholds::default();
     let f = Fixture::new();
     f.event("agent-1", "acquired", 10);
-    let _ = f.tile(true, &thresholds);
+    let _ = f.entry(true, &thresholds);
     let first = quivive::cursor::load(&f.root().join(".pact")).unwrap();
     assert!(first.tail_len > 0);
 
@@ -258,7 +324,7 @@ fn an_idle_tick_keeps_the_cursor_usable() {
         !f.read(true).cold,
         "a tick with a valid cursor must not be a cold read"
     );
-    let _ = f.tile(true, &thresholds); // nothing appended
+    let _ = f.entry(true, &thresholds); // nothing appended
     let second = quivive::cursor::load(&f.root().join(".pact")).unwrap();
     assert_eq!(second.offset, first.offset);
     assert_eq!(
@@ -266,14 +332,4 @@ fn an_idle_tick_keeps_the_cursor_usable() {
         "a quiet tick must not forget the tail it can still verify"
     );
     assert_eq!(second.tail_hash, first.tail_hash);
-}
-
-#[test]
-fn severity_ordering_puts_the_worst_agent_first() {
-    // `worst` and the head of `agents` must agree, because the text tile names
-    // `agents[0]` and a renderer colours from `worst`. Two ways to compute the
-    // same fact is the first place they disagree.
-    let tile = mixed().tile(true, &Thresholds::default());
-    assert_eq!(tile.worst, "dead");
-    assert_eq!(tile.agents.first().unwrap().state.as_str(), "dead");
 }

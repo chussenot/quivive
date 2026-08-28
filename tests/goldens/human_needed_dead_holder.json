@@ -8,7 +8,7 @@
       "path": "REPO_PATH",
       "status": "human-needed",
       "agents": {
-        "active": 0,
+        "active": 1,
         "idle": 0,
         "stale": 0,
         "dead": 1
@@ -16,9 +16,9 @@
       "attention": [
         {
           "kind": "dead_holding_paths",
-          "agent": "long-gone-but-holding",
+          "agent": "ghost",
           "paths": [
-            "src/state.rs"
+            "src/fold.rs"
           ],
           "remaining_ttl": 0
         }

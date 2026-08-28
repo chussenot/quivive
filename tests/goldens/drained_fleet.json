@@ -1,17 +1,17 @@
 {
   "v": 1,
   "at": "2026-08-28T09:00:00Z",
-  "status": "active",
+  "status": "drained",
   "repos": [
     {
       "name": "REPO_NAME",
       "path": "REPO_PATH",
-      "status": "active",
+      "status": "drained",
       "agents": {
-        "active": 1,
+        "active": 0,
         "idle": 0,
         "stale": 0,
-        "dead": 2
+        "dead": 0
       },
       "attention": []
     }
