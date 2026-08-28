@@ -63,7 +63,6 @@ fn run(cli: Cli) -> Result<i32> {
             Ok(EXIT_OK)
         }
         Command::Why { repo, json } => {
-            // Stubbed until quivive-15r.
             quivive::why::run(&repo, json)?;
             Ok(EXIT_OK)
         }

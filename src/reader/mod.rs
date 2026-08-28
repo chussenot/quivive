@@ -1,6 +1,6 @@
 //! The tick: repo -> readers -> merged evidence -> the tile.
 //!
-//! See the data-flow diagram in `docs/spec.md#the-tick`. This module is the solid
+//! See the data-flow diagram in `docs/spec.md#tick`. This module is the solid
 //! edges of it; `cursor` is the dotted ones.
 
 pub mod activity;
@@ -20,7 +20,7 @@ use crate::cursor::{self, Cursor};
 /// Where pact keeps its state for this repository.
 ///
 /// `PACT_STATE_DIR` is honoured because pact honours it: a repository whose state
-/// has been redirected is one where `<repo>/.pact` is empty, and vigil reporting
+/// has been redirected is one where `<repo>/.pact` is empty, and quivive reporting
 /// "no ledger" there would be confidently wrong. pact's worktree-scope
 /// redirection is deliberately NOT reimplemented — that is a second copy of
 /// somebody else's resolution logic, which drifts. A worktree whose state lives
@@ -157,8 +157,8 @@ pub fn commit(repo_root: &Path, readings: &Readings) {
     if let Some(c) = &readings.cursor {
         let state = state_dir(repo_root);
         // Only into a state directory that already exists. Creating `.pact/` in a
-        // repository that has no pact would be vigil initialising somebody else's
-        // tool, and would make `vigil tile` leave a trace in a repo it had nothing
+        // repository that has no pact would be quivive initialising somebody else's
+        // tool, and would make `quivive tile` leave a trace in a repo it had nothing
         // to say about.
         if state.is_dir() {
             cursor::save(&state, c);

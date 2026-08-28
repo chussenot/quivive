@@ -12,17 +12,17 @@
 //! pact's own record is the RFC3339 timestamp inside the file, written as
 //! *content* rather than trusted to the filesystem's mtime (pact's own
 //! `src/activity.rs` explains why: mtime granularity varies by filesystem and a
-//! copy or archive can reset it). vigil reads both anyway and merges
+//! copy or archive can reset it). quivive reads both anyway and merges
 //! newest-wins, the same rule the ledger, the leases and this reader all feed
 //! into one accumulator with:
 //!
 //! * The **content**, when it parses, is pact's own answer and is exact to the
 //!   microsecond.
 //! * The **mtime** is evidence too, and it is what survives a record this
-//!   version of vigil cannot parse — a future pact writing a format this reader
+//!   version of quivive cannot parse — a future pact writing a format this reader
 //!   has not been taught, or a half-written file caught mid-write. Dropping
 //!   evidence just because we could not read the format around it would make an
-//!   upgrade on pact's side look like an agent going quiet on vigil's.
+//!   upgrade on pact's side look like an agent going quiet on quivive's.
 //!
 //! In the ordinary case the two nearly coincide — content is generated and
 //! written in the same syscall's neighbourhood, measured a few milliseconds
