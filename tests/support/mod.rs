@@ -36,6 +36,12 @@ pub fn now() -> DateTime<Utc> {
 
 pub struct Fixture {
     dir: TempDir,
+    /// The repository root `tile::tick` reads from. Equal to `dir.path()` for
+    /// [`Fixture::new`]/[`Fixture::bare`]; a named subdirectory of it for
+    /// [`Fixture::named`]/[`Fixture::bare_named`] — kept separate from `dir`
+    /// so the `TempDir` (and its cleanup-on-drop) does not have to share a
+    /// basename with the repo it is standing in for.
+    root: PathBuf,
     ledger: PathBuf,
     has_pact: bool,
 }
@@ -44,12 +50,14 @@ impl Fixture {
     /// A repository with a `.pact/` directory and an empty ledger.
     pub fn new() -> Self {
         let dir = tempfile::tempdir().unwrap();
-        let state = dir.path().join(".pact");
+        let root = dir.path().to_path_buf();
+        let state = root.join(".pact");
         std::fs::create_dir_all(&state).unwrap();
         let ledger = state.join("events.jsonl");
         std::fs::write(&ledger, "").unwrap();
         Self {
             dir,
+            root,
             ledger,
             has_pact: true,
         }
@@ -59,16 +67,53 @@ impl Fixture {
     /// case where the text tile must say `unreadable` rather than report zeros.
     pub fn bare() -> Self {
         let dir = tempfile::tempdir().unwrap();
-        let ledger = dir.path().join(".pact").join("events.jsonl");
+        let root = dir.path().to_path_buf();
+        let ledger = root.join(".pact").join("events.jsonl");
         Self {
             dir,
+            root,
+            ledger,
+            has_pact: false,
+        }
+    }
+
+    /// Like [`Fixture::new`], but the repo root is a subdirectory of the
+    /// tempdir named `name` — so `tile::tick`'s `repos[].name` (the directory
+    /// basename) is `name` rather than a random tempdir name. Exists for the
+    /// S13 samples in `tests/goldens.rs`: those payloads are committed to a
+    /// sibling repository, where an unreadable random basename would be
+    /// useless as a worked example.
+    pub fn named(name: &str) -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join(name);
+        let state = root.join(".pact");
+        std::fs::create_dir_all(&state).unwrap();
+        let ledger = state.join("events.jsonl");
+        std::fs::write(&ledger, "").unwrap();
+        Self {
+            dir,
+            root,
+            ledger,
+            has_pact: true,
+        }
+    }
+
+    /// [`Fixture::bare`], with a chosen basename — see [`Fixture::named`].
+    pub fn bare_named(name: &str) -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join(name);
+        std::fs::create_dir_all(&root).unwrap();
+        let ledger = root.join(".pact").join("events.jsonl");
+        Self {
+            dir,
+            root,
             ledger,
             has_pact: false,
         }
     }
 
     pub fn root(&self) -> &Path {
-        self.dir.path()
+        &self.root
     }
 
     fn stamp(&self, secs_ago: i64) -> String {
@@ -137,7 +182,7 @@ impl Fixture {
         ttl_secs: u64,
         file_exists: bool,
     ) -> &Self {
-        let leases = self.dir.path().join(".pact").join("leases");
+        let leases = self.root().join(".pact").join("leases");
         std::fs::create_dir_all(&leases).unwrap();
         let lock = format!(
             r#"{{"agent":"{}","path":"{}","acquired_at":"{}","ttl_secs":{},"note":"a note","branch":"main"}}"#,
@@ -152,7 +197,7 @@ impl Fixture {
         )
         .unwrap();
         if file_exists {
-            let target = self.dir.path().join(path);
+            let target = self.root().join(path);
             if let Some(p) = target.parent() {
                 std::fs::create_dir_all(p).unwrap();
             }
@@ -164,7 +209,7 @@ impl Fixture {
     /// A file beside the locks that is not a `.lock` — pact's staging sibling,
     /// which a tick landing mid-acquire will see.
     pub fn lease_staging_file(&self, name: &str) -> &Self {
-        let leases = self.dir.path().join(".pact").join("leases");
+        let leases = self.root().join(".pact").join("leases");
         std::fs::create_dir_all(&leases).unwrap();
         std::fs::write(leases.join(name), "half a lock").unwrap();
         self
@@ -174,7 +219,7 @@ impl Fixture {
     /// an RFC3339 timestamp is the content. Mirrors pact's own `touch()`
     /// (`src/activity.rs`), not a guess — see `reader::activity`.
     pub fn activity(&self, agent: &str, secs_ago: i64) -> &Self {
-        let dir = self.dir.path().join(".pact").join("activity");
+        let dir = self.root().join(".pact").join("activity");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join(agent), self.stamp(secs_ago)).unwrap();
         self
@@ -204,8 +249,8 @@ impl Fixture {
             waves_json.join(","),
             gates_json.join(","),
         );
-        std::fs::create_dir_all(self.dir.path().join(".pact")).unwrap();
-        std::fs::write(self.dir.path().join(".pact").join("plan.json"), json).unwrap();
+        std::fs::create_dir_all(self.root().join(".pact")).unwrap();
+        std::fs::write(self.root().join(".pact").join("plan.json"), json).unwrap();
         self
     }
 
@@ -220,7 +265,7 @@ impl Fixture {
         field: &str,
         new_value: &str,
     ) -> &Self {
-        let dir = self.dir.path().join(".beads");
+        let dir = self.root().join(".beads");
         std::fs::create_dir_all(&dir).unwrap();
         let line = format!(
             r#"{{"id":"int-{}","kind":"field_change","created_at":"{}","actor":"{}","issue_id":"{}","extra":{{"field":"{}","new_value":"{}"}}}}"#,
@@ -239,7 +284,7 @@ impl Fixture {
     /// ledger.
     pub fn sidecar_raw(&self, line: &str) -> &Self {
         use std::io::Write;
-        let dir = self.dir.path().join(".beads");
+        let dir = self.root().join(".beads");
         std::fs::create_dir_all(&dir).unwrap();
         let mut f = std::fs::OpenOptions::new()
             .create(true)
@@ -252,14 +297,14 @@ impl Fixture {
 
     pub fn read(&self, use_cursor: bool) -> Readings {
         reader::read(&reader::Options {
-            repo_root: self.dir.path().to_path_buf(),
+            repo_root: self.root().to_path_buf(),
             use_cursor,
         })
         .expect("a fixture repository is always readable")
     }
 
     pub fn commit(&self, readings: &Readings) {
-        reader::commit(self.dir.path(), readings);
+        reader::commit(self.root(), readings);
     }
 
     /// This fixture's own [`RepoEntry`], with the default thresholds unless
@@ -267,7 +312,7 @@ impl Fixture {
     /// second read-and-commit sequence, so the goldens exercise the exact
     /// function the CLI calls per repo.
     pub fn entry(&self, use_cursor: bool, thresholds: &Thresholds) -> RepoEntry {
-        quivive::tile::tick(self.dir.path(), now(), thresholds, use_cursor)
+        quivive::tile::tick(self.root(), now(), thresholds, use_cursor)
             .expect("a fixture repository is always readable")
     }
 
@@ -277,7 +322,7 @@ impl Fixture {
     /// would be a bug in the fixture, not something to paper over.
     pub fn tile(&self, use_cursor: bool, thresholds: &Thresholds) -> Payload {
         quivive::tile::build(
-            &[self.dir.path().to_path_buf()],
+            &[self.root().to_path_buf()],
             now(),
             thresholds,
             use_cursor,
@@ -287,11 +332,11 @@ impl Fixture {
     }
 
     pub fn has_cursor(&self) -> bool {
-        quivive::cursor::load(&self.dir.path().join(".pact")).is_some()
+        quivive::cursor::load(&self.root().join(".pact")).is_some()
     }
 
     pub fn delete_cursor(&self) {
-        let _ = std::fs::remove_file(quivive::cursor::path_in(&self.dir.path().join(".pact")));
+        let _ = std::fs::remove_file(quivive::cursor::path_in(&self.root().join(".pact")));
     }
 
     pub fn is_bare(&self) -> bool {
