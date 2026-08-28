@@ -295,6 +295,30 @@ four string consts that clap renders and `Thresholds::default()` parses, so ther
 is one source; and the numbers were deleted from `docs/spec.md`'s Mermaid diagram
 labels, which was a third copy.
 
+## Experiment 8 — the two legs only CI could run
+
+Two caveats were written down here as unverified, with the note that "the first CI
+run is where they get cashed". It ran, and they are.
+
+**`mise run lint-scripts`.** shellcheck could not be obtained in the environment
+these runs happened in — its binary download returns 403 — so `check-docs.sh` and
+`fleet-sim.sh` were reviewed by hand against the warning-severity rules and
+otherwise unverified. CI ran `shellcheck --severity=warning scripts/*.sh` and both
+are clean. Hand review is not a substitute for the tool; it was green this time,
+which is not the same as being a reliable method.
+
+**`mise run check` as a whole.** mise itself was not installed locally, so each leg
+had been invoked directly and the composition never was. CI ran it end to end:
+`fmt-check`, `lint`, `lint-scripts`, `test`, `check-docs`, in that order, in 15
+seconds.
+
+The run also confirms two things worth checking rather than assuming, given
+everything else on this page. `rust-toolchain.toml`'s pin was honoured — the
+runner has both 1.94.1 and 1.98.0 available and the build used **1.94.1** — and
+`cargo test --no-fail-fast` reported all six test binaries: 58 passed, with the
+bench correctly `ignored` rather than silently skipped. A green step is not by
+itself evidence that the step did the work; the log is.
+
 ## The six times a check passed for the wrong reason
 
 Collected, because the pattern is worth more than the instances:
@@ -331,13 +355,6 @@ not match the frozen clock that was passed in. It is the argument for the
 
 Said plainly, because a study that only reports its successes is an advertisement:
 
-- **`mise run lint-scripts`.** shellcheck could not be obtained in the
-  environment this run happened in — the binary download returns 403 — so the two
-  scripts were reviewed by hand against the warning-severity rules and are
-  otherwise unverified. It is a required leg of `mise run check`, so the first CI
-  run is its first real execution. If it is red, that is this note being cashed.
-- **`mise run check` as a whole.** mise itself was not installed here. Each leg
-  was invoked directly, in the order the task lists them; the composition was not.
 - **The two-layer changelog** has no release to demonstrate it on.
 - **Anything outside Linux.** No platform matrix, no MSRV promise, no published
   binary — and that is [D9](../adr/0003-yagni-deferral-register.md) rather than an
