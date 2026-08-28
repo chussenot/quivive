@@ -8,9 +8,9 @@
 
 mod support;
 
+use quivive::state::Thresholds;
+use quivive::tile::Tile;
 use support::Fixture;
-use vigil::state::Thresholds;
-use vigil::tile::Tile;
 
 fn tile_of(f: &Fixture) -> Tile {
     f.tile(true, &Thresholds::default())
@@ -123,7 +123,7 @@ fn a_ledger_that_is_a_directory_reads_as_absent() {
     // rather than in the middle of the read loop.
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join(".pact").join("events.jsonl")).unwrap();
-    let readings = vigil::reader::read(&vigil::reader::Options {
+    let readings = quivive::reader::read(&quivive::reader::Options {
         repo_root: dir.path().to_path_buf(),
         use_cursor: true,
     })
@@ -133,7 +133,7 @@ fn a_ledger_that_is_a_directory_reads_as_absent() {
 
 #[test]
 fn a_repo_path_that_does_not_exist_is_the_one_real_error() {
-    let err = vigil::reader::read(&vigil::reader::Options {
+    let err = quivive::reader::read(&quivive::reader::Options {
         repo_root: "/definitely/not/here".into(),
         use_cursor: true,
     });
@@ -152,7 +152,7 @@ fn an_unwritable_state_directory_does_not_fail_a_tick() {
     let readings = f.read(true);
     // A directory that does not exist: `commit` must not create it, and must not
     // complain about not creating it.
-    vigil::reader::commit(std::path::Path::new("/definitely/not/here"), &readings);
+    quivive::reader::commit(std::path::Path::new("/definitely/not/here"), &readings);
     assert_eq!(tile_of(&f).fleet.total, 1);
 }
 

@@ -1,15 +1,20 @@
 //! Thin: parse, dispatch, choose an exit code. Everything that decides anything
 //! lives in the library, so the tests can reach it without spawning a process.
+//!
+//! Owns all module wiring (docs/spec.md S22: "the whole CLI is tile, watch,
+//! why") so that a bead landing one of `registry`, `stream`, `watch` or `why`
+//! never has to touch this file — it edits its own module and the dispatch
+//! below keeps working unchanged.
 
 use std::io::Write;
 
 use anyhow::Result;
-use clap::{CommandFactory, Parser};
+use clap::Parser;
 
-use vigil::cli::{Cli, Command, Common};
-use vigil::state::Thresholds;
-use vigil::tile::Tile;
-use vigil::{EXIT_FAIL, EXIT_OK, EXIT_TRIGGERED, dur, reader};
+use quivive::cli::{Cli, Command, Common};
+use quivive::state::Thresholds;
+use quivive::tile::Tile;
+use quivive::{EXIT_FAIL, EXIT_OK, EXIT_TRIGGERED, dur, reader};
 
 fn main() {
     // clap's own exit code for a usage error is 2, and docs/tile-contract.md
@@ -28,7 +33,7 @@ fn main() {
     match run(cli) {
         Ok(code) => std::process::exit(code),
         Err(e) => {
-            eprintln!("vigil: {e:#}");
+            eprintln!("quivive: {e:#}");
             std::process::exit(EXIT_FAIL);
         }
     }
@@ -36,27 +41,25 @@ fn main() {
 
 fn run(cli: Cli) -> Result<i32> {
     match cli.command {
-        Command::Completion { shell } => {
-            let mut cmd = Cli::command();
-            let name = cmd.get_name().to_string();
-            clap_complete::generate(shell, &mut cmd, name, &mut std::io::stdout());
+        Command::Tile { common, stream } => {
+            if stream {
+                // Stubbed until quivive-5uv; `?` turns its error into EXIT_FAIL
+                // the same way every other unimplemented path does.
+                quivive::stream::run(&common)?;
+                Ok(EXIT_OK)
+            } else {
+                tick_once(&common)
+            }
+        }
+        Command::Watch {} => {
+            // Stubbed until quivive-8mq.
+            quivive::watch::run()?;
             Ok(EXIT_OK)
         }
-        Command::Tile { common } => tick_once(&common),
-        Command::Watch { common, interval } => {
-            let interval = dur::parse(&interval)?;
-            // One tick before the first sleep: a bar that starts vigil wants a
-            // tile now, not in a second.
-            loop {
-                let code = tick_once(&common)?;
-                // --exit-on ends a watch as well as a tile. A watch that kept
-                // printing after the condition it was asked to watch for would
-                // make the flag mean something different in the two commands.
-                if code == EXIT_TRIGGERED {
-                    return Ok(code);
-                }
-                std::thread::sleep(interval);
-            }
+        Command::Why { repo, json } => {
+            // Stubbed until quivive-15r.
+            quivive::why::run(&repo, json)?;
+            Ok(EXIT_OK)
         }
     }
 }
@@ -77,8 +80,8 @@ fn tick_once(common: &Common) -> Result<i32> {
     let readings = reader::read(&opts)?;
 
     // One read of the clock per tick, taken here and passed down. See
-    // `vigil::now` for why the seam exists and what it is for.
-    let now = vigil::now()?;
+    // `quivive::now` for why the seam exists and what it is for.
+    let now = quivive::now()?;
     let repo = opts
         .repo_root
         .canonicalize()
@@ -98,8 +101,8 @@ fn tick_once(common: &Common) -> Result<i32> {
     } else {
         writeln!(out, "{}", tile.text())?;
     }
-    // Flush explicitly: `vigil watch | head -1` closes the pipe, and an ignored
-    // flush error there is a broken-pipe panic on exit.
+    // Flush explicitly: `quivive tile --stream | head -1` closes the pipe, and
+    // an ignored flush error there is a broken-pipe panic on exit.
     let _ = out.flush();
 
     if let Some(threshold) = common.exit_on

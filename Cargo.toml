@@ -1,5 +1,5 @@
 [package]
-name = "vigil"
+name = "quivive"
 version = "0.0.0"
 edition = "2024"
 rust-version = "1.94"
@@ -10,17 +10,16 @@ license = "MIT"
 # 0.0.0 is the unreleased placeholder; the first `cog bump` writes a real one.
 
 [dependencies]
-# The dependency budget, matching the family's: serde/serde_json, clap,
-# clap_complete, chrono, anyhow. Anything else needs a justifying comment here.
+# The dependency budget, matching the family's: serde/serde_json, clap, chrono,
+# anyhow. Anything else needs a justifying comment here.
 #
-# chrono, and not a hand-rolled RFC3339: every timestamp vigil reads was written
+# chrono, and not a hand-rolled RFC3339: every timestamp quivive reads was written
 # by pact as RFC3339 with an offset, and parsing that correctly means offsets,
 # leap years and fractional seconds. A hand-rolled parser here would be a source
 # of wrong ages, and a wrong age is a wrong state.
 anyhow = "1"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock", "serde"] }
 clap = { version = "4", features = ["derive"] }
-clap_complete = "4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

@@ -15,9 +15,9 @@ use std::io::Write;
 use std::time::{Duration, Instant};
 
 use chrono::TimeDelta;
-use vigil::reader::{self, Options};
-use vigil::state::Thresholds;
-use vigil::tile::Tile;
+use quivive::reader::{self, Options};
+use quivive::state::Thresholds;
+use quivive::tile::Tile;
 
 /// The size the ceilings are quoted at. Large enough to be a busy long-lived
 /// repository, and 20x pact's own rewrite threshold of 5000 lines — so this also

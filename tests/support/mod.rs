@@ -22,10 +22,10 @@
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, TimeDelta, Utc};
+use quivive::reader::{self, Readings};
+use quivive::state::Thresholds;
+use quivive::tile::Tile;
 use tempfile::TempDir;
-use vigil::reader::{self, Readings};
-use vigil::state::Thresholds;
-use vigil::tile::Tile;
 
 /// The frozen clock every fixture and every golden is relative to.
 pub const NOW: &str = "2026-08-28T09:00:00Z";
@@ -187,11 +187,11 @@ impl Fixture {
     }
 
     pub fn has_cursor(&self) -> bool {
-        vigil::cursor::load(&self.dir.path().join(".pact")).is_some()
+        quivive::cursor::load(&self.dir.path().join(".pact")).is_some()
     }
 
     pub fn delete_cursor(&self) {
-        let _ = std::fs::remove_file(vigil::cursor::path_in(&self.dir.path().join(".pact")));
+        let _ = std::fs::remove_file(quivive::cursor::path_in(&self.dir.path().join(".pact")));
     }
 
     pub fn is_bare(&self) -> bool {
