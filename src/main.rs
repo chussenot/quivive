@@ -13,8 +13,7 @@ use clap::Parser;
 
 use quivive::cli::{Cli, Command, Common};
 use quivive::state::Thresholds;
-use quivive::tile::Tile;
-use quivive::{EXIT_FAIL, EXIT_OK, EXIT_TRIGGERED, dur, reader};
+use quivive::{EXIT_FAIL, EXIT_OK, EXIT_TRIGGERED, dur, registry, tile};
 
 fn main() {
     // clap's own exit code for a usage error is 2, and docs/tile-contract.md
@@ -76,40 +75,42 @@ fn tick_once(common: &Common) -> Result<i32> {
     };
     thresholds.validate()?;
 
-    let opts = reader::Options {
-        repo_root: common.repo.clone(),
-        use_cursor: !common.no_cursor,
+    // No `--repo`: every path the registry names (S1-S2), and one bad entry
+    // degrades to a quiet `no-fleet` row rather than taking the whole payload
+    // down. An explicit `--repo`: just that path, and it is a real error if it
+    // does not resolve — a human typed it, and there is no registry to degrade
+    // around (see `tile::tick`'s doc comment).
+    let (repo_roots, degrade_unreadable) = match &common.repo {
+        Some(path) => (vec![path.clone()], false),
+        None => (registry::read()?, true),
     };
-    let readings = reader::read(&opts)?;
 
     // One read of the clock per tick, taken here and passed down. See
     // `quivive::now` for why the seam exists and what it is for.
     let now = quivive::now()?;
-    let repo = opts
-        .repo_root
-        .canonicalize()
-        .unwrap_or_else(|_| opts.repo_root.clone());
-    let tile = Tile::build(&readings, &repo.display().to_string(), now, &thresholds);
-
-    // The cursor is committed AFTER the tile is built, so a panic while rendering
-    // cannot leave a cursor advanced past events that were never reported.
-    reader::commit(&repo, &readings);
+    let payload = tile::build(
+        &repo_roots,
+        now,
+        &thresholds,
+        !common.no_cursor,
+        degrade_unreadable,
+    )?;
 
     let mut out = std::io::stdout().lock();
-    if common.json {
+    if common.text {
+        writeln!(out, "{}", payload.text())?;
+    } else {
         // Pretty, and deliberately: a tile is read by people at least as often as
         // by bars, `jq` does not care, and a diff of two pretty tiles is legible
         // where a diff of two long lines is not — which the goldens depend on.
-        writeln!(out, "{}", serde_json::to_string_pretty(&tile)?)?;
-    } else {
-        writeln!(out, "{}", tile.text())?;
+        writeln!(out, "{}", serde_json::to_string_pretty(&payload)?)?;
     }
     // Flush explicitly: `quivive tile --stream | head -1` closes the pipe, and
     // an ignored flush error there is a broken-pipe panic on exit.
     let _ = out.flush();
 
     if let Some(threshold) = common.exit_on
-        && tile.worst_state().is_some_and(|w| w >= threshold)
+        && tile::severity(payload.status) >= tile::severity(threshold)
     {
         return Ok(EXIT_TRIGGERED);
     }
