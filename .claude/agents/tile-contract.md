@@ -10,7 +10,7 @@ color: purple
 
 # tile-contract
 
-You own the **tile**: the shape vigil emits, the one-line text form, the exit
+You own the **tile**: the shape quivive emits, the one-line text form, the exit
 codes, and the goldens that pin all three.
 [docs/tile-contract.md](../../docs/tile-contract.md) is the document you maintain,
 and [ADR-0002](../../docs/adr/0002-no-daemon-renderer-boundary.md) is why it is a
@@ -66,15 +66,21 @@ fix is in the fold, never in the golden — see
 
 ## Things to hold the line on
 
-- **One line, always.** Including `quiet`, including fully degraded. A bar has one
-  line of room and no way to be told otherwise.
-- **`degraded` is never an error.** A repository with no `.pact/` is normal; a
-  tile that exits non-zero over it takes somebody's status bar down.
-- **No formatted values in JSON.** `age_s` is an integer; `6m52s` is a rendering
-  decision, and a consumer given the string cannot get back to the number.
-- **Exit code 2 is load-bearest.** `--exit-on` is what makes "no notifications"
-  ([D3](../../docs/adr/0003-yagni-deferral-register.md)) an honest deferral rather
-  than a missing feature. Do not let it drift into meaning something else.
+- **One line, always.** Including `quiet`, including a repo a reader could not
+  fully read. A bar has one line of room and no way to be told otherwise.
+- **A read failure is never an error.** A repository with no `.pact/` is normal;
+  a tile that exits non-zero over it takes somebody's status bar down. (A
+  decline is currently tracked internally as `RepoSnapshot.degraded` but not
+  serialized anywhere in S11's shape — see [ledger-reader](ledger-reader.md) if
+  that gap needs closing; it is not this role's call alone.)
+- **No formatted values in JSON.** `remaining_ttl` and every other age-shaped
+  field is an integer; `6m52s` is a rendering decision, and a consumer given the
+  string cannot get back to the number.
+- **Exit code 2 is load-bearing.** `--exit-on` is the alert path for a script
+  that calls `tile` directly instead of running `watch`, and it is what makes
+  "no hooks, no acting beyond a push" ([D3](../../docs/adr/0003-yagni-deferral-register.md))
+  an honest deferral rather than a missing feature. Do not let it drift into
+  meaning something else.
 
 ## How to work
 
