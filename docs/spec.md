@@ -43,6 +43,122 @@ lines they satisfy.
   else `all-quiet` (pact present, nothing moving), else `no-fleet` (no pact
   state at all).
 
+### The readers
+
+Five, each allowed to fail independently — a repository with no leases is a
+normal repository, not a broken one:
+
+| Reader | Reads | Cursor | Missing means |
+|---|---|---|---|
+| **ledger** | tail of `.pact/events.jsonl` | yes — the only streamed input (S4) | no pact in this repo |
+| **lease** | `.pact/leases/*` | no — small, read whole each tick | nobody currently holds a path; a repository's resting state |
+| **activity** | `.pact/activity/*` | no — small, read whole each tick | no activity directory: an older pact, or a fleet that has not run a command yet this checkout |
+| **plan** | `.pact/plan.json` | no — one clean snapshot or none | no plan.json: an undirected fleet, not a broken one |
+| **sidecar** | `.beads/interactions.jsonl` | no — append-only but small; read whole is cheaper than a cursor here | bd's audit export is off, or there is no bd at all |
+
+**`activity` replaced a `worktree` reader** this page and [ADR-0001](adr/0001-stream-first-tile.md#consequences)
+used to name: the first draft inferred liveness from the mtime of a leased
+path, which credited an agent with a `git checkout` it did not do. `activity`
+reads pact's own per-agent trace instead — one record per invocation, written
+by pact's identity resolution before any subcommand runs — so it stays
+evidence the agent itself wrote, the line [D10](adr/0003-yagni-deferral-register.md)
+draws.
+
+### The state machine
+
+Each agent seen across the ledger, the leases and the activity records has
+exactly one state per tick, decided by the age of its newest evidence against
+three thresholds. Recovery is always direct to `ACTIVE`: an agent that leaves
+evidence is alive, and there is no convalescent state that needs two ticks to
+leave.
+
+```mermaid
+stateDiagram-v2
+    [*] --> ACTIVE: first event
+
+    ACTIVE --> IDLE: no evidence for<br/>--active-window
+    IDLE --> STALE: no evidence for<br/>--idle-window
+    STALE --> DEAD: no evidence for<br/>--dead-window
+
+    IDLE --> ACTIVE: new evidence
+    STALE --> ACTIVE: new evidence
+    DEAD --> ACTIVE: new evidence
+
+    DEAD --> [*]: --forget (unless holding a lease)
+```
+
+The default windows are four string constants in `src/state.rs`, parsed by
+both `Thresholds::default()` and clap — so `quivive tile --help` is where you
+look them up, and there is no second copy here to go stale. **A lease's expiry
+does not, by itself, move an agent's state**: classification is age-only. A
+`DEAD` agent that still holds a lease is instead surfaced as its own fact —
+S16's `dead_holding_paths` attention item — which is a sharper thing to act on
+than folding it back into the state machine as a fifth transition.
+
+The `--forget` sweep at the end is bookkeeping, not a state: an agent nobody
+has heard from in that long stops occupying space in the tile, unless it is
+still holding a lease, in which case it stays however long it has been gone —
+a blocking lease must not silently disappear from view.
+
+### Data flow
+
+```mermaid
+flowchart LR
+    reg[("registry<br/>~/.config/quivive/repos")]
+
+    subgraph onerepo["one repo, one tick"]
+        repo[("one repository<br/>.pact/ + .beads/")]
+
+        L["ledger<br/>(streamed from cursor)"]
+        S["lease<br/>(read whole)"]
+        A["activity<br/>(read whole)"]
+        P["plan<br/>(pact plan.json)"]
+        D["sidecar<br/>(bd's committed<br/>interactions.jsonl)"]
+
+        repo --> L
+        repo --> S
+        repo --> A
+        repo --> P
+        repo --> D
+
+        fold["fold: per-agent<br/>newest evidence"]
+        sm["state machine<br/>ACTIVE/IDLE/STALE/DEAD"]
+        assess["assess:<br/>status + attention items"]
+
+        L --> fold
+        S --> fold
+        A --> fold
+        P --> fold
+        D --> fold
+        fold --> sm --> assess
+    end
+
+    reg -->|"once per<br/>registered path"| repo
+    assess --> payload["Payload<br/>v, at, status, repos[]"]
+
+    payload --> once["quivive tile<br/>one shot, exits"]
+    payload --> stream["quivive tile --stream<br/>one line per change"]
+    payload --> loop["quivive watch<br/>notify-send<br/>on transitions"]
+
+    loop -.->|next tick| reg
+    stream -.->|next tick| reg
+
+    fold -.->|cursor + accumulator| cursor[("resume cursor<br/>quivive-cursor.json")]
+    cursor -.->|seek| L
+```
+
+The dotted edges are the only state that survives a tick, and
+[ADR-0001](adr/0001-stream-first-tile.md) is the rule about them: **deleting
+the cursor and re-running must produce a byte-identical tile.** The solid
+edges are the whole computation, repeated once per path the registry names
+(S1-S2) or once for an explicit `--repo`.
+
+`quivive why <repo>` (S21) runs this same per-repo pipeline once, straight
+through to `assess`, but outside this diagram: it takes a single repository
+rather than fanning out over the registry, and it reads cold with no cursor —
+a one-shot answer to "what needs a human" has nothing to resume and nothing to
+persist.
+
 ## Tile (stream-first)
 
 - S9. `quivive tile --stream` follows the pwetty push contract: spawn once,
@@ -71,9 +187,12 @@ lines they satisfy.
 - S18. Event: a gate-order violation — work in wave N+1 started before wave N's
   declared gates closed, derived from `.pact/plan.json` plus the events tail.
 - S19. Event: the fleet drained (S8's `drained` became true).
-- S20. Every notification carries its follow-up command — `pact lease ls`,
-  `bd show <id>`, or `recount explain --event-line N` — quivive points, the
-  family answers.
+- S20. Every notification carries its follow-up command, chosen per event:
+  `pact lease ls` (S16), `bd show <id>` (S17), `pact audit --check gate-order`
+  (S18) or `bd ready` (S19) — quivive points, the family answers. `quivive why`
+  answers S18 more precisely still, with `recount explain --event-line N`, when
+  it has an event-line to cite; `watch`'s own live loop does not, so it names
+  the family's gate-order auditor instead.
 
 ## Why
 
