@@ -223,11 +223,14 @@ registry entry that fails to resolve, by contrast, degrades to a quiet
 bad line in `~/.config/quivive/repos` must not take the whole fleet's tile
 down.
 
-Code 2 is what makes [D3](adr/0003-yagni-deferral-register.md) — no
-notifications in this crate — an honest deferral rather than a gap:
-`quivive tile --exit-on human-needed || notify-send "fleet needs you"` is the
-cheap 90% of an alert, using whatever notifier the caller already has
-configured. `--exit-on` takes one of S8's five status names — the same
+Code 2 is the alert path for a script that shells out to `quivive tile`
+directly instead of running `quivive watch`'s own `notify-send` loop:
+`quivive tile --exit-on human-needed || notify-send "fleet needs you"`, using
+whatever notifier the caller already has configured. It is also what makes
+[D3](adr/0003-yagni-deferral-register.md) — no hooks, no acting on a
+transition beyond a one-way push — an honest deferral rather than a gap: both
+this exit code and `watch`'s own notifications stop at saying, never doing.
+`--exit-on` takes one of S8's five status names — the same
 `human-needed`/`active`/`drained`/`all-quiet`/`no-fleet` vocabulary as
 `status` above, not the four-state *agent* machine (`active`/`idle`/`stale`/
 `dead`) those counts are made of; the two vocabularies are easy to confuse
@@ -268,9 +271,29 @@ plus a frozen `at`; a golden that needed a sleep, a real clock or a retry
 would be evidence that purity has been lost, and the fix belongs in the fold,
 never in the golden.
 
-`tests/goldens/*.json` in this crate today are a **starting base**, not the
-final set: they exercise the reader/fold side (declines, the forget sweep,
-the cursor invariant) rather than S13's five canonical samples
-(`all-quiet`, `active`, `human-needed`, `drained`, `no-fleet`). The goldens
-bead rewrites them against those five; this page already reflects the shape
-that rewrite will pin, so it needed no further change when that lands.
+`tests/goldens/` holds two kinds of fixture, and only one is S13. Most of the
+files (`declines.json`, `forget.json`, `expired_kinds.json`, and others)
+exercise the reader/fold side directly — declines, the forget sweep, the
+cursor invariant — and predate S13's canonical set. `tests/goldens/{all-quiet,
+active, human-needed, drained, no-fleet}.json` are that canonical set, and the
+JSON example above is shaped to match them.
+
+### The sample-sync rule
+
+S13's own sentence — samples verified in *both* repos — is a cross-repository
+promise, not just a local one. `tests/goldens/{all-quiet, active, human-needed,
+drained, no-fleet}.json` in **this** repo are the single source of truth;
+`waybar-pwetty-box/tiles/quivive/samples/<name>.json` must be a byte-identical
+copy of each. `tests/goldens.rs`'s own suite asserts that byte-identity
+whenever the sibling repo is reachable (`QUIVIVE_PWETTY_SAMPLES_DIR`, or the
+two repos checked out side by side as siblings) and skips cleanly, with the
+reason printed, when it is not — a lone `quivive` clone has no sibling to
+check against, and that absence is not a defect.
+
+To change one of the five: regenerate here first
+(`UPDATE_GOLDENS=1 cargo test --test goldens`), read the diff — a question,
+never a failure to silence, see [Changing the contract](#changing-the-contract)
+above — then copy the regenerated file over pwetty's copy verbatim and run
+`pwetty check quivive` there. Never hand-edit either copy out of sync with the
+other; the two are the same fact recorded twice on purpose, and a hand-edit is
+exactly the drift that makes recording it twice worthless.
