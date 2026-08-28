@@ -36,7 +36,7 @@ jobs:
       # Caches ~/.cargo and ./target, keyed on the lockfile and toolchain. Must
       # sit before the cargo steps: it restores where it stands and saves in its
       # post step. A no-op while this repository has no crate, and harmless.
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
 
       # Puts `mise` on PATH so the gates below are the same `mise run` invocations
       # a developer types. It does NOT install Rust: rust-toolchain.toml is the
