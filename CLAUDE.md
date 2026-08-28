@@ -80,3 +80,13 @@ discipline as code.
 Before proposing anything vigil currently refuses, check the
 [deferral register](docs/adr/0003-yagni-deferral-register.md): the row probably
 exists, and it names the condition that would reverse it.
+
+<!-- pact:begin hash:bec01292 -->
+## pact coordination protocol
+
+Claude Code loads this file, not `AGENTS.md`, so the protocol is imported
+here instead of copied — one source of truth, in the file the other agents
+already read. Run `pact init` to refresh it.
+
+@AGENTS.md
+<!-- pact:end -->
