@@ -40,11 +40,15 @@ fn main() {
 
 fn run(cli: Cli) -> Result<i32> {
     match cli.command {
-        Command::Tile { common, stream } => {
+        Command::Tile {
+            common,
+            stream,
+            interval,
+        } => {
             if stream {
-                // Stubbed until quivive-5uv; `?` turns its error into EXIT_FAIL
-                // the same way every other unimplemented path does.
-                quivive::stream::run(&common)?;
+                // `?` turns a bad --interval or a stream-loop error into
+                // EXIT_FAIL, the same as every other CLI-level failure here.
+                quivive::stream::run(&common, dur::parse(&interval)?)?;
                 Ok(EXIT_OK)
             } else {
                 tick_once(&common)
