@@ -51,7 +51,7 @@
 # The script verifies at tick 26 that the silenced agents really did vanish from
 # the ledger, because if they did not, the comparison is back to proving nothing.
 #
-# The clock is frozen with VIGIL_NOW for phase 3, because a tile carries the
+# The clock is frozen with QUIVIVE_NOW for phase 3, because a tile carries the
 # instant it was computed at and two invocations a millisecond apart are
 # legitimately different tiles. Freezing it is what makes "byte-identical" a
 # statement about the fold rather than about the clock.
@@ -84,7 +84,7 @@ while [ $# -gt 0 ]; do
 	esac
 done
 
-BIN=${BIN:-./target/debug/vigil}
+BIN=${BIN:-./target/debug/quivive}
 [ -x "$BIN" ] || {
 	echo "fleet-sim: $BIN not built — run \`mise run build\` first" >&2
 	exit 2
@@ -221,11 +221,11 @@ lines=$(wc -l <"$ledger")
 echo "phase 3: writers stopped, ledger is $lines lines; comparing warm against cold"
 
 # Frozen, and this is the load-bearing line of the whole script.
-export VIGIL_NOW="2026-08-28T09:00:00Z"
+export QUIVIVE_NOW="2026-08-28T09:00:00Z"
 
 warm=$("$BIN" tile --json --repo "$repo")
 cold=$("$BIN" tile --json --repo "$repo" --no-cursor)
-rm -f "$repo/.pact/vigil-cursor.json"
+rm -f "$repo/.pact/quivive-cursor.json"
 recold=$("$BIN" tile --json --repo "$repo")
 
 if [ "$warm" != "$cold" ]; then

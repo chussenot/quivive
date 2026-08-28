@@ -124,7 +124,11 @@ impl Fixture {
     }
 
     /// One lock file, in pact's shape. `file_exists` controls whether the leased
-    /// path is on disk, which is what the worktree reader keys off.
+    /// path is on disk — kept for signature stability across the fixtures that
+    /// already call this (`tests/degradation.rs`'s escaping-path cases), though
+    /// no reader currently keys off it: the reader that once did (`worktree`)
+    /// was retired for reading a surface `docs/spec.md#S4` does not name. See
+    /// the handoff on quivive-o3j.
     pub fn lease(
         &self,
         agent: &str,
@@ -163,6 +167,86 @@ impl Fixture {
         let leases = self.dir.path().join(".pact").join("leases");
         std::fs::create_dir_all(&leases).unwrap();
         std::fs::write(leases.join(name), "half a lock").unwrap();
+        self
+    }
+
+    /// One activity record, in pact's shape: the agent's name is the filename,
+    /// an RFC3339 timestamp is the content. Mirrors pact's own `touch()`
+    /// (`src/activity.rs`), not a guess — see `reader::activity`.
+    pub fn activity(&self, agent: &str, secs_ago: i64) -> &Self {
+        let dir = self.dir.path().join(".pact").join("activity");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(agent), self.stamp(secs_ago)).unwrap();
+        self
+    }
+
+    /// `.pact/plan.json`, in pact's own linted-snapshot shape. Takes the pieces
+    /// rather than a raw string so a caller cannot accidentally write JSON
+    /// `reader::plan` would never actually see from a real `pact plan lint` —
+    /// `edges`/`waves` as `id -> ...` pairs, `gates` as the gate ids.
+    pub fn plan(&self, edges: &[(&str, &[&str])], waves: &[(&str, i64)], gates: &[&str]) -> &Self {
+        let edges_json: Vec<String> = edges
+            .iter()
+            .map(|(id, deps)| {
+                let deps_json: Vec<String> = deps.iter().map(|d| format!("{d:?}")).collect();
+                format!("{id:?}:[{}]", deps_json.join(","))
+            })
+            .collect();
+        let waves_json: Vec<String> = waves
+            .iter()
+            .map(|(id, wave)| format!("{id:?}:{wave}"))
+            .collect();
+        let gates_json: Vec<String> = gates.iter().map(|g| format!("{g:?}")).collect();
+        let json = format!(
+            r#"{{"at":"{}","edges":{{{}}},"waves":{{{}}},"gates":[{}]}}"#,
+            self.stamp(0),
+            edges_json.join(","),
+            waves_json.join(","),
+            gates_json.join(","),
+        );
+        std::fs::create_dir_all(self.dir.path().join(".pact")).unwrap();
+        std::fs::write(self.dir.path().join(".pact").join("plan.json"), json).unwrap();
+        self
+    }
+
+    /// One row of `.beads/interactions.jsonl`, in bd's shape — a `field_change`
+    /// naming `field`/`new_value` (`old_value` omitted; no reader downstream
+    /// needs it in a fixture). See `reader::sidecar`.
+    pub fn interaction(
+        &self,
+        issue_id: &str,
+        actor: &str,
+        secs_ago: i64,
+        field: &str,
+        new_value: &str,
+    ) -> &Self {
+        let dir = self.dir.path().join(".beads");
+        std::fs::create_dir_all(&dir).unwrap();
+        let line = format!(
+            r#"{{"id":"int-{}","kind":"field_change","created_at":"{}","actor":"{}","issue_id":"{}","extra":{{"field":"{}","new_value":"{}"}}}}"#,
+            issue_id,
+            self.stamp(secs_ago),
+            actor,
+            issue_id,
+            field,
+            new_value,
+        );
+        self.sidecar_raw(&line)
+    }
+
+    /// A line exactly as given, appended to `.beads/interactions.jsonl` — for
+    /// garbage and blank-line fixtures, matching [`Fixture::raw`] for the
+    /// ledger.
+    pub fn sidecar_raw(&self, line: &str) -> &Self {
+        use std::io::Write;
+        let dir = self.dir.path().join(".beads");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(dir.join("interactions.jsonl"))
+            .unwrap();
+        writeln!(f, "{line}").unwrap();
         self
     }
 

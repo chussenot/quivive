@@ -28,7 +28,16 @@ use serde::{Deserialize, Serialize};
 ///
 /// Named in `docs/tile-contract.md`, which makes it part of the contract: a
 /// consumer is entitled to delete this file, and deleting it must only cost time.
-pub const CURSOR_FILE: &str = "vigil-cursor.json";
+///
+/// **Renamed from `vigil-cursor.json`** to match the crate's rename to quivive
+/// (quivive-qeg). Not a migration, on purpose: [`load`] simply will not find a
+/// file under the old name, which reads as no cursor and forces one cold read —
+/// exactly the outcome deleting the file by hand already produces, and the
+/// invariant this whole module exists to prove is that outcome always is
+/// correct. A cache is not worth writing migration code to preserve; an old
+/// `vigil-cursor.json` left behind by a pre-rename checkout is simply dead
+/// weight that the next `commit` overwrites the state directory around.
+pub const CURSOR_FILE: &str = "quivive-cursor.json";
 
 /// Bumped only if this file's shape changes incompatibly. An older cursor is not
 /// migrated, it is discarded — see [`load`]. Migration code for a cache is code
