@@ -20,3 +20,9 @@
 # The plan manifest handed to `pact plan lint` is a build artifact of one run
 # (pact docs/plan.md); the linted snapshot that travels is .pact/plan.json.
 plan.jsonl
+
+# The plan manifest is a build artifact of one run — pact plan lint's own doc
+# says not to commit it; the linted snapshot it writes to .pact/plan.json is
+# runtime state and already ignored with the rest of .pact/. The bead graph
+# itself travels in .beads-remote/.
+/plan.jsonl
