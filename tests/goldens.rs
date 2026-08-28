@@ -16,25 +16,49 @@
 //! what makes a payload a fixed string at all. A golden that needed a `sleep`, a
 //! real clock or a retry would be evidence that purity has been lost.
 //!
-//! **This is a starting base, not the final set.** `quivive-jx3` rewrites these
-//! against the five S13 samples (`all-quiet`, `active`, `human-needed`,
-//! `drained`, `no-fleet`) in both repos. The scenarios here exercise the same
-//! ground from the reader/fold side — declines, the forget sweep, the ledger's
-//! purity invariant — and are kept intentionally small so that bead has a clean
-//! base to build on rather than a second, competing set of samples to reconcile.
+//! The scenarios above the `// S13 samples` marker below exercise the
+//! reader/fold side directly — declines, the forget sweep, the ledger's purity
+//! invariant — and are kept intentionally small; they existed before
+//! `quivive-jx3` and are not part of S13's canonical five.
 //!
-//! **Path normalization**: a [`quivive::tile::RepoEntry`]'s `name` and `path`
-//! come from the fixture's own tempdir, which is different on every run — so
-//! [`assert_golden`] replaces the fixture's real path (and its basename) with
-//! fixed placeholders before comparing. Nothing else in the payload is ever
-//! rewritten.
+//! **Path normalization** (reader/fold scenarios): a [`quivive::tile::RepoEntry`]'s
+//! `name` and `path` come from the fixture's own tempdir, which is different on
+//! every run — so [`assert_golden`] replaces the fixture's real path (and its
+//! basename) with fixed placeholders before comparing. Nothing else in the
+//! payload is ever rewritten.
+//!
+//! # S13 samples, and the cross-repo sync rule
+//!
+//! S13, verbatim: "The samples are exactly: `all-quiet`, `active`,
+//! `human-needed`, `drained`, `no-fleet` — and golden tests verify them in BOTH
+//! repos: quivive asserts it can emit each sample byte-for-byte from a
+//! fixture, pwetty asserts the samples validate against `schema.json`."
+//!
+//! `tests/goldens/{all-quiet,active,human-needed,drained,no-fleet}.json` in
+//! *this* repo are that byte-for-byte emission, each pinned against a fixture
+//! built with [`support::Fixture::named`]/[`support::Fixture::bare_named`] so
+//! `repos[].name` is a real, readable string instead of a random tempdir name
+//! — see [`fake_repo_path`] for how `repos[].path` is still made deterministic
+//! despite coming from a tempdir.
+//!
+//! **The sync rule**: these five files are the single source of truth. A
+//! sibling copy lives at `waybar-pwetty-box/tiles/quivive/samples/<name>.json`
+//! — [`assert_matches_pwetty_sample`] asserts byte-identity with it whenever
+//! that path is reachable (`QUIVIVE_PWETTY_SAMPLES_DIR`, or the two repos
+//! checked out as siblings), and prints why it is skipping rather than failing
+//! when it is not — a lone `quivive` clone has no sibling repo to check
+//! against, and that is not a defect in this repo. To change one of the five:
+//! `UPDATE_GOLDENS=1 cargo test --test goldens`, read the diff (a question,
+//! not a failure — see the module doc above), then copy the regenerated file
+//! over pwetty's copy verbatim and run `pwetty check quivive` there. Never
+//! hand-edit either copy directly out of sync with the other.
 
 mod support;
 
 use std::path::{Path, PathBuf};
 
 use quivive::state::Thresholds;
-use quivive::tile::Payload;
+use quivive::tile::{Payload, build};
 use support::Fixture;
 
 fn golden_dir() -> PathBuf {
@@ -203,6 +227,233 @@ fn forgetting_spares_an_agent_that_is_blocking_a_lease() {
     assert_eq!(payload.repos[0].agents.dead, 1);
     assert_eq!(payload.status, quivive::state::RepoStatus::HumanNeeded);
     assert_golden("forget", f.root(), &payload);
+}
+
+// ---------------------------------------------------------------------------
+// S13 samples
+//
+// The five, exactly as S13 names them, each a real multi-repo payload (S11)
+// over fixtures built with `Fixture::named`/`Fixture::bare_named` so
+// `repos[].name` is a readable string rather than a random tempdir name. The
+// repo composition below (quivive/pact/recount/scratch, the same bead ids)
+// mirrors what pwetty's tile contribution already invented for its MOCK
+// samples — this is the reconciliation `quivive-jx3` exists to do: the same
+// worked example, now built from real fixtures and real code instead of
+// hand-authored JSON.
+// ---------------------------------------------------------------------------
+
+/// A deterministic stand-in for a fixture's real (tempdir, therefore
+/// different-every-run) canonicalized path, in `docs/tile-contract.md`'s own
+/// illustrative style (`/home/user/repos/<name>`). Unlike [`normalize`]'s
+/// generic `REPO_PATH` placeholder, this is what actually ships in the
+/// sibling repo's samples, so it reads as a real fixed example rather than a
+/// redaction.
+fn fake_repo_path(name: &str) -> String {
+    format!("/home/user/repos/{name}")
+}
+
+/// Build the one-shot payload (S11) over several named fixtures — what
+/// `quivive tile --repo <a> --repo <b> ...` would print if `--repo` took more
+/// than one path, and what a registry naming all of them prints today — then
+/// replace each fixture's real tempdir path with [`fake_repo_path`].
+/// `repos[].name` needs no rewriting: [`support::Fixture::named`] already
+/// gives it the name this sample should show.
+fn s13_payload(repos: &[&Fixture], thresholds: &Thresholds) -> (Payload, String) {
+    let roots: Vec<PathBuf> = repos.iter().map(|f| f.root().to_path_buf()).collect();
+    let payload = build(&roots, support::now(), thresholds, true, false)
+        .expect("every S13 fixture repository is readable");
+    let mut json = serde_json::to_string_pretty(&payload).unwrap();
+    for f in repos {
+        let canon = f
+            .root()
+            .canonicalize()
+            .unwrap_or_else(|_| f.root().to_path_buf());
+        let real = canon.display().to_string();
+        let name = canon
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        json = json.replace(&real, &fake_repo_path(&name));
+    }
+    json.push('\n');
+    (payload, json)
+}
+
+/// Where pwetty's copy of the S13 samples lives, if this checkout can see it
+/// at all: `QUIVIVE_PWETTY_SAMPLES_DIR` first (a worktree fleet, or any layout
+/// where the two repos are not plain siblings), then the two relative depths
+/// a sibling checkout of `waybar-pwetty-box` can be found at. `None` — never
+/// an error — when neither resolves, which is the ordinary shape of a lone
+/// `quivive` clone.
+fn pwetty_samples_dir() -> Option<PathBuf> {
+    if let Ok(p) = std::env::var("QUIVIVE_PWETTY_SAMPLES_DIR") {
+        let p = PathBuf::from(p);
+        if p.is_dir() {
+            return Some(p);
+        }
+    }
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    [
+        manifest.join("../waybar-pwetty-box/tiles/quivive/samples"),
+        manifest.join("../../waybar-pwetty-box/tiles/quivive/samples"),
+    ]
+    .into_iter()
+    .find(|candidate| candidate.is_dir())
+}
+
+/// The other half of S13: this repo's golden IS pwetty's sample. Skipped —
+/// cleanly, with a printed reason, never a failure — when
+/// [`pwetty_samples_dir`] cannot find the sibling repo at all.
+fn assert_matches_pwetty_sample(name: &str, json: &str) {
+    let Some(dir) = pwetty_samples_dir() else {
+        println!(
+            "skipping cross-repo byte check for {name}: waybar-pwetty-box not found beside \
+             this checkout (set QUIVIVE_PWETTY_SAMPLES_DIR to its tiles/quivive/samples to \
+             check it anyway)"
+        );
+        return;
+    };
+    let path = dir.join(format!("{name}.json"));
+    let Ok(expected) = std::fs::read_to_string(&path) else {
+        println!(
+            "skipping cross-repo byte check for {name}: found {} but no {name}.json in it",
+            dir.display()
+        );
+        return;
+    };
+    assert_eq!(
+        expected, json,
+        "quivive's tests/goldens/{name}.json and pwetty's tiles/quivive/samples/{name}.json \
+         have gone out of sync — see this file's module doc for the sync rule. Regenerate \
+         here first (UPDATE_GOLDENS=1 cargo test --test goldens), read the diff, then copy \
+         the regenerated file over pwetty's copy verbatim.\n"
+    );
+}
+
+/// Compare (or rewrite, under `UPDATE_GOLDENS=1`) against
+/// `tests/goldens/{name}.json`, then check the sibling repo's copy.
+fn assert_s13_sample(name: &str, repos: &[&Fixture], thresholds: &Thresholds) -> Payload {
+    let (payload, json) = s13_payload(repos, thresholds);
+    let path = golden_dir().join(format!("{name}.json"));
+    if std::env::var("UPDATE_GOLDENS").is_ok() {
+        std::fs::create_dir_all(golden_dir()).unwrap();
+        std::fs::write(&path, &json).unwrap();
+    } else {
+        let expected = std::fs::read_to_string(&path).unwrap_or_else(|_| {
+            panic!(
+                "no golden at {}. If this scenario is new, run:\n    \
+                 UPDATE_GOLDENS=1 cargo test --test goldens\n\
+                 then read the diff before committing it.",
+                path.display()
+            )
+        });
+        assert_eq!(
+            expected, json,
+            "S13 sample {name}.json differs.\n\n\
+             This is a question, not a failure: did the CONTRACT change (regenerate, \
+             update docs/tile-contract.md, decide about `v`) or did the FOLD break \
+             (the golden is right)? A contract change also needs pwetty's copy updated \
+             — see this file's module doc for the sync rule.\n"
+        );
+    }
+    assert_matches_pwetty_sample(name, &json);
+    payload
+}
+
+#[test]
+fn s13_sample_all_quiet() {
+    let thresholds = Thresholds::default();
+    let repo_quivive = Fixture::named("quivive"); // pact present, nothing ever worked
+    let repo_pact = Fixture::named("pact");
+
+    let payload = assert_s13_sample("all-quiet", &[&repo_quivive, &repo_pact], &thresholds);
+    assert_eq!(payload.status, quivive::state::RepoStatus::AllQuiet);
+}
+
+#[test]
+fn s13_sample_active() {
+    let thresholds = Thresholds::default();
+
+    let repo_quivive = Fixture::named("quivive");
+    repo_quivive.event("agent-1", "acquired", 5); // ACTIVE
+    repo_quivive.event("agent-2", "renewed", 30); // ACTIVE
+    repo_quivive.event("agent-3", "acquired", 120); // IDLE
+
+    let repo_pact = Fixture::named("pact");
+    repo_pact.event("done-agent", "released", 100_000); // forgotten — quiet past `forget`
+    repo_pact.plan(&[("proj-1", &[])], &[("proj-1", 0)], &[]); // plan alone reads as drained
+
+    let repo_recount = Fixture::named("recount"); // pact present, nothing ever worked: all-quiet
+
+    let payload = assert_s13_sample(
+        "active",
+        &[&repo_quivive, &repo_pact, &repo_recount],
+        &thresholds,
+    );
+    assert_eq!(payload.status, quivive::state::RepoStatus::Active);
+    assert_eq!(payload.repos[0].status, quivive::state::RepoStatus::Active);
+    assert_eq!(payload.repos[1].status, quivive::state::RepoStatus::Drained);
+    assert_eq!(
+        payload.repos[2].status,
+        quivive::state::RepoStatus::AllQuiet
+    );
+}
+
+#[test]
+fn s13_sample_drained() {
+    let thresholds = Thresholds::default();
+
+    let repo_quivive = Fixture::named("quivive");
+    repo_quivive.event("done-agent", "released", 100_000);
+    repo_quivive.plan(&[("proj-1", &[])], &[("proj-1", 0)], &[]);
+
+    let repo_pact = Fixture::named("pact"); // pact present, nothing ever worked: all-quiet
+
+    let payload = assert_s13_sample("drained", &[&repo_quivive, &repo_pact], &thresholds);
+    assert_eq!(payload.status, quivive::state::RepoStatus::Drained);
+}
+
+#[test]
+fn s13_sample_human_needed() {
+    let thresholds = Thresholds::default();
+
+    let repo_quivive = Fixture::named("quivive");
+    repo_quivive.event("agent-1", "acquired", 5); // ACTIVE
+    repo_quivive.event("agent-4", "acquired", 412); // STALE
+    repo_quivive.event("agent-6", "acquired", 2400); // DEAD, and holds two leases
+    repo_quivive.lease("agent-6", "src/fold.rs", 2400, 300, false);
+    repo_quivive.lease("agent-6", "src/state.rs", 2400, 300, false);
+    // S17: a bead the committed sidecar flags as needing a human decision.
+    repo_quivive.interaction("quivive-15r", "someone", 100, "type", "needs-decision");
+    // S18: quivive-eea (wave 3) started before quivive-ykn (wave 2, still
+    // open) closed.
+    repo_quivive.plan(
+        &[("quivive-ykn", &[]), ("quivive-eea", &["quivive-ykn"])],
+        &[("quivive-ykn", 2), ("quivive-eea", 3)],
+        &["quivive-ykn"],
+    );
+    repo_quivive.interaction("quivive-eea", "someone", 100, "status", "claimed");
+
+    let repo_pact = Fixture::named("pact");
+    repo_pact.event("agent-1", "acquired", 5); // ACTIVE, and nothing else needing a look
+
+    let payload = assert_s13_sample("human-needed", &[&repo_quivive, &repo_pact], &thresholds);
+    assert_eq!(payload.status, quivive::state::RepoStatus::HumanNeeded);
+    assert_eq!(
+        payload.repos[0].status,
+        quivive::state::RepoStatus::HumanNeeded
+    );
+    assert_eq!(payload.repos[0].attention.len(), 3);
+    assert_eq!(payload.repos[1].status, quivive::state::RepoStatus::Active);
+}
+
+#[test]
+fn s13_sample_no_fleet() {
+    let thresholds = Thresholds::default();
+    let repo_scratch = Fixture::bare_named("scratch"); // no `.pact/` at all
+
+    let payload = assert_s13_sample("no-fleet", &[&repo_scratch], &thresholds);
+    assert_eq!(payload.status, quivive::state::RepoStatus::NoFleet);
 }
 
 // ---------------------------------------------------------------------------
