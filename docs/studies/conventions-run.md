@@ -2,7 +2,7 @@
 title: Proving the conventions before the code
 status: active
 date: 2026-08-28
-description: Field notes from the two runs that built this repository — what each gate was measured against, the six times a check passed for the wrong reason, and what is still unproven.
+description: Field notes from the two runs that built this repository and the fleet run that then rebuilt it for v0.1 — what each gate was measured against, the six times a check passed for the wrong reason, and what is still unproven.
 ---
 
 # Proving the conventions before the code
@@ -382,3 +382,80 @@ Said plainly, because a study that only reports its successes is an advertisemen
 
 Each of those is a thing to come back and fill in. The first release's Notes
 paragraph is the natural place to say which of them turned out to be true.
+
+## The v0.1 fleet build
+
+The single-repo tool the experiments above were run against was rebuilt as
+quivive's multi-repo v0.1 (registry, tick, tile, stream, watch, why) by a
+fleet of agents coordinating over pact, in the same repository. This section
+is what `bd`, `pact log`/`pact audit` and `git log` say about that run — no
+number below is estimated.
+
+**Shape of the run.** [`.pact/plan.json`](../../.pact/plan.json) lints five
+waves: wave 1 the crate skeleton and rename; wave 2 the readers, the state
+model and the registry; wave 3 the tile payload, the pwetty contribution,
+`watch` and `why`; wave 4 stream mode and the goldens/bench suite; wave 5 this
+documentation bead. Ten planned beads closed across waves 1-4, plus a
+phase-0 smoke bead (`quivive-ksy`) that predates the plan and exists only to
+prove the shared Dolt store accepted a write. `bd list` shows 15 closed beads,
+one open follow-up (`quivive-1y2`, filed to unify three independent
+derivations of S18's "started" set — see below), the epic, and this bead. The
+branch carries 76 commits.
+
+**Four unplanned bug beads, all filed at the wave-3/4 boundary.** `bd show`
+on each names the same free-run window: `quivive-s16` (an integration bead —
+`watch` and `tile` had rewritten `main.rs`/`cli.rs` against incompatible APIs
+on parallel branches, discovered when the two merged), `quivive-jwp`,
+`quivive-trx`, and `quivive-374`. None was in the original plan; the wave
+plan closes with ten beads, the actual run closed fourteen implementation
+beads before this one.
+
+**The merge oracle caught a test that had passed at authoring time.**
+`quivive-jwp`'s own description: a `why` test built against a frozen clock
+constant passed when written and failed hours later on the *same, untouched*
+commit — "discovered by the wave-3 merge oracle" (`pact merge --verify`,
+re-running the suite at merge time rather than trusting a stale green from
+whenever the branch last ran it). The cause: a fixture wrote an activity
+record whose file mtime was real wall-clock time while its content was
+pinned to the frozen test clock, and the reader takes `max(content, mtime)`
+— so as real time drifted past the frozen clock, the mtime started winning
+and the fixture agent read `ACTIVE` instead of `DEAD`. Fixed by pinning the
+fixture's mtime with `set_modified` instead of trusting the write time.
+
+**A prune-freeze bug found by one bead's reasoning about a sibling's code.**
+`quivive-trx`'s own description credits it explicitly: the `stream` bead's
+module doc worked out that `watch`'s mtime-pruning (S5: skip the re-read on
+an unchanged repo) must not also skip *re-assessing the clock* — DEAD and
+`drained` are transitions that become true by time passing with no new
+write, and a quiet repo whose read was skipped never re-evaluated them. The
+reasoning was written for `stream`, which does not prune; whoever picked up
+`quivive-trx` recognized the same gap sitting dormant in `watch.rs` and
+reproduced it with two fixtures before fixing it (cache the last snapshot,
+re-run `state::assess` against it at the new clock on every pass, even a
+pruned one).
+
+**S18 (gate-order violations) was wired last, immediately before this
+bead.** `watch`'s live loop shipped with `plan: None` always set — a known
+gap noted by `watch-r2` and confirmed still dormant by `watch-r3` — so a
+gate-order violation could be asserted in a fixture but could never fire from
+a real tick. `quivive-374` closed that gap (folding `S18`'s started-bead set
+incrementally through the resume cursor, then wiring `plan` and `started`
+into `watch`'s snapshot) two commits before the branch tip this bead started
+from — the commit trailer literally reads "S18 wired and merged... docs wave
+next."
+
+**A retry storm, named by `pact audit --check retry-storm`:** *"tile refused
+src/cli.rs 45 time(s), retrying every ~15s against a median 30m22s of holder
+lease left — and NEVER got the path."* The ledger bears this out exactly: 45
+of the run's 46 `refused` events are `tile` re-acquiring `src/cli.rs` between
+11:13:15 and 11:28:52 while `watch` held it, none of them ever landing. Not a
+rule violation — a refused agent is entitled to ask again — but exactly the
+spent-for-nothing work `AGENTS.md`'s own coordination protocol names: `pact
+lease acquire --wait` or `pact watch add` would have spent none of it.
+
+18 distinct pact agent identities acted in this run (`pact audit`'s
+attribution table), several of them resumption names for a bead whose first
+holder went quiet — `tile-r2`, `watch-r2`, `watch-r3`, `why-r2` — which is the
+`--to-owner-of` addressing scheme in `AGENTS.md` working as designed: the
+lease note that `tile-r2` inherited on acquiring `docs/tile-contract.md` said
+in so many words that it was "resuming dead holder's work."
