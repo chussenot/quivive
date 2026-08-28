@@ -29,9 +29,14 @@ obligation to agree with it.
 vigil is unusually exposed, because its help necessarily makes *claims about
 behaviour* and quotes *numbers*:
 
-- **Three thresholds with defaults** — `--active-window`, `--idle-window`,
-  `--dead-window` — each a constant living somewhere else, each quoted in prose
-  next to the flag and probably in the spec's diagram labels as well.
+- **Four window defaults** — `--active-window`, `--idle-window`, `--dead-window`,
+  `--forget`. These are currently drift-proof *by construction*: each is a string
+  const in `src/state.rs` that clap renders into `--help` and
+  `Thresholds::default()` parses, so there is one source. **Verify that is still
+  true** rather than checking the values: the first draft of this crate had the
+  same numbers as literals in both files with nothing connecting them, and writing
+  this role file down is what exposed it. If you find a default quoted in prose
+  anywhere — a doc, a diagram label, a help string — that copy is the finding.
 - **Exit codes**, including code 2's precise meaning under `--exit-on`. That is a
   behavioural contract asserted in prose; the goldens and the
   [tile contract](../../docs/tile-contract.md) are what actually hold it.
@@ -62,10 +67,11 @@ is the mistake this agent exists to catch in others.
    command actually returns, "not a daemon" against the absence of anything that
    binds or forks.
 4. **Defaults and constants quoted in prose.** Every threshold, every window,
-   every cap. `grep` the constant and compare. These rot silently because changing
-   a constant does not touch the prose beside it — and here they are quoted in
-   `--help`, in `docs/spec.md`, and inside a Mermaid diagram's labels, which is the
-   copy everyone forgets.
+   every cap, and the bench ceilings in `tests/bench.rs`. `grep` the constant and
+   compare. These rot silently because changing a constant does not touch the
+   prose beside it, and a **Mermaid diagram label** is the copy everyone forgets —
+   `docs/spec.md`'s state diagram quoted three of them until the numbers were
+   deleted from it and replaced with the flag names alone.
 5. **Help exists and says something.** Every subcommand and flag has non-empty
    help; no TODO, no placeholder, no sentence that trails off. A flag whose help
    merely restates its own name is worth reporting once, not a crusade.

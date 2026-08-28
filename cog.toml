@@ -25,12 +25,11 @@ skip_ci = "[skip ci]"
 # before the tag exists. A tag whose manifest disagrees with it ships a binary
 # whose `--version` lies, and that is only discoverable after the fact.
 #
-# Guarded on Cargo.toml, because this repository's conventions and documentation
-# landed before its crate did (docs/studies/conventions-run.md). The guard costs
-# one line and removes itself: once Cargo.toml exists, both hooks run.
+# These were guarded on `test ! -f Cargo.toml` while this repository had
+# conventions and no crate. It has one now, so the guards are gone.
 pre_bump_hooks = [
-  "test ! -f Cargo.toml || sed -i '0,/^version *=/ s/^version *=.*/version = \"{{version}}\"/' Cargo.toml",
-  "test ! -f Cargo.toml || cargo check --quiet",
+  "sed -i '0,/^version *=/ s/^version *=.*/version = \"{{version}}\"/' Cargo.toml",
+  "cargo check --quiet",
 ]
 
 [changelog]

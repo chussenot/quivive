@@ -22,8 +22,26 @@ mise run check
 ```
 
 That is the whole required gate — `fmt-check`, `lint`, `lint-scripts`, `test`,
-`check-docs` — in the same order CI runs them. Cargo tasks skip loudly while this
-repository has no `Cargo.toml`; see `scripts/with-crate.sh`.
+`check-docs` — in the same order CI runs them.
+
+Two more that are not in `check`, because both are slow and one is probabilistic:
+
+```
+mise run bench    # the per-tick ceilings, release profile
+mise run fleet     # the resume-cursor invariant, against concurrent writers
+```
+
+Run `fleet` whenever you touch a reader, the fold or the cursor. Its header
+explains the experiment; two earlier drafts of it passed a deliberately broken
+cursor, so the tick numbers in it are the experiment and not decoration.
+
+## The one invariant
+
+**Deleting `.pact/vigil-cursor.json` and re-running must produce a byte-identical
+tile.** Everything in `src/` is in service of that sentence
+([ADR-0001](docs/adr/0001-stream-first-tile.md)). `--no-cursor` is the fastest
+diagnostic in the repository: if the tile changes when you pass it, the cursor is
+wrong and you already know which half to read.
 
 ## The rules that get broken most
 

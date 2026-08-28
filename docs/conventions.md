@@ -41,12 +41,18 @@ commands, and there is no second definition of "the tests" to drift.
 parallel, and these legs all reach one binary through one path, so a parallel leg
 rebuilding it mid-spawn is a race with a confusing failure.
 
-While this repository has no `Cargo.toml` — the conventions and the documentation
-landed first, deliberately; see
-[docs/studies/conventions-run.md](studies/conventions-run.md) — every cargo task
-is routed through `scripts/with-crate.sh`, which says loudly that it skipped and
-exits 0. The guard removes itself when the crate lands, with nothing for anyone to
-remember.
+`mise run test` passes `--no-fail-fast`, and that is not a preference: cargo stops
+after the first test *binary* that fails, so one broken unit test hides everything
+the four integration suites would have said. That cost a wrong conclusion during
+this crate's own construction — see
+[docs/studies/conventions-run.md](studies/conventions-run.md).
+
+The conventions and the documentation in this repository landed **before** the
+crate, deliberately. While that was true, every cargo task was routed through a
+`scripts/with-crate.sh` guard that said loudly it had skipped and exited 0, built
+to remove itself once `Cargo.toml` existed. It has: the tasks invoke cargo
+directly, and the guard is gone. A permanent indirection that always execs is the
+ceremony this convention exists to avoid.
 
 ## Versioning and commits
 
@@ -156,6 +162,11 @@ Said plainly, so nobody mistakes silence for approval:
 - the README's *why*-only discipline and its length
 - "never write a claim you have not checked"
 - whether an ADR's priced alternatives are honestly priced
+- **whether a test would fail if the code were wrong.** Four times during this
+  repository's construction, a check passed for a reason other than the one
+  claimed. The only defence found so far is a **negative control**: break the
+  thing on purpose, in a throwaway copy, and confirm the check goes red. Nothing
+  enforces that; `docs/studies/conventions-run.md` records what it caught.
 - **whether a Mermaid diagram parses.** It is checked, but by hand: mermaid's own
   parser needs node and a DOM, and adding a JavaScript toolchain to a Rust
   repository's required gate costs more than the defect it prevents. The

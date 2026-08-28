@@ -10,10 +10,16 @@
 # first cargo invocation — including in CI. Pinning rust here as well would make
 # two files that can disagree about the toolchain, which is the exact failure the
 # pin exists to prevent, one level up.
+#
+# `scripts/with-crate.sh` used to wrap every cargo task, so that they were green
+# on a repository whose conventions had landed and whose crate had not. It was
+# built to remove itself once Cargo.toml existed, and it has: the tasks below
+# invoke cargo directly. A permanent indirection that always execs is the
+# ceremony this file exists to avoid.
 
 [tasks.build]
 description = "Build the vigil binary"
-run = "scripts/with-crate.sh cargo build"
+run = "cargo build"
 
 [tasks.test]
 description = "Run the whole suite: unit, reader fixtures, tile goldens"
@@ -21,7 +27,12 @@ description = "Run the whole suite: unit, reader fixtures, tile goldens"
 # docs/adr/0003-yagni-deferral-register.md refuses a TUI, a daemon, network and
 # persistence, so there is nothing to gate — and a two-way all-features/default
 # leg here would be ceremony guarding nothing.
-run = "scripts/with-crate.sh cargo test"
+# --no-fail-fast, and it is not a preference. cargo stops after the first test
+# BINARY that fails, so a broken unit test hides everything the four integration
+# suites would have said. That cost a wrong conclusion during this crate's own
+# construction: a seeded cursor defect looked like it was caught by one unit test
+# and missed by the goldens, when the goldens had simply never run.
+run = "cargo test --no-fail-fast"
 
 [tasks."tile-goldens"]
 description = "Re-check the tile contract against its goldens (see docs/tile-contract.md)"
@@ -34,7 +45,7 @@ description = "Re-check the tile contract against its goldens (see docs/tile-con
 # The goldens are only meaningful because a tick is a pure function of (ledger,
 # clock, thresholds) — docs/adr/0001-stream-first-tile.md is what makes that
 # true, so if this task ever needs a sleep, that ADR has been violated.
-run = "scripts/with-crate.sh cargo test --test goldens"
+run = "cargo test --test goldens"
 
 [tasks.bench]
 description = "Measure the per-tick ceiling the spec sets (release, synthetic ledger, minutes)"
@@ -46,7 +57,7 @@ description = "Measure the per-tick ceiling the spec sets (release, synthetic le
 # Deliberately NOT part of `check`: it writes a large synthetic ledger and takes
 # minutes. A required gate with those properties is one people switch off. Run it
 # when you have touched a reader, the fold, or the resume cursor.
-run = "scripts/with-crate.sh cargo test --release --test bench -- --ignored --nocapture"
+run = "cargo test --release --test bench -- --ignored --nocapture"
 
 [tasks.fleet]
 description = "Soak-test vigil against a live multi-agent fleet writing a real ledger"
@@ -54,32 +65,30 @@ description = "Soak-test vigil against a live multi-agent fleet writing a real l
 # needs a pact-initialised repo with workers writing to it — three properties
 # that turn a required gate into one people disable.
 #
-# The pair is what makes it a measurement rather than a demo: the control run
-# ticks with the resume cursor deleted before every tick (so every tick is a full
-# re-read) and the treatment run ticks normally, and the two MUST produce byte-
-# identical tiles. That is the invariant of
-# docs/adr/0001-stream-first-tile.md stated as an experiment — a cursor is
-# correct only if throwing it away changes nothing but the time taken.
+# What makes it a measurement rather than a demo is that the cursor is advanced
+# under writes it does not control, and then compared against a cold read of the
+# same file with the clock frozen. The two MUST agree: a cursor is correct only if
+# throwing it away changes nothing but the time taken
+# (docs/adr/0001-stream-first-tile.md).
 #
-# `scripts/fleet-sim.sh` does not exist yet and lands with the crate. That is not
-# a dangling reference in disguise: with-crate.sh skips while there is no
-# Cargo.toml, and the moment there is one this task fails loudly with
-# "No such file" — which is exactly when somebody should be writing it.
-run = "scripts/with-crate.sh scripts/fleet-sim.sh"
+# The script's header explains the three-step ordering the comparison needs, and
+# why two earlier drafts of it passed a deliberately broken cursor. Read it before
+# changing the tick numbers in it — they are the experiment, not decoration.
+run = ["cargo build", "scripts/fleet-sim.sh -n 8 -t 30"]
 
 [tasks.fmt]
 description = "Format the code"
-run = "scripts/with-crate.sh cargo fmt"
+run = "cargo fmt"
 
 [tasks."fmt-check"]
 description = "Check formatting without writing changes"
-run = "scripts/with-crate.sh cargo fmt -- --check"
+run = "cargo fmt -- --check"
 
 [tasks.lint]
 description = "Run clippy with warnings denied, over all targets"
 # --all-targets, not the default: the default misses tests/, and the proof
 # obligations in docs/spec.md live there.
-run = "scripts/with-crate.sh cargo clippy --all-targets -- -D warnings"
+run = "cargo clippy --all-targets -- -D warnings"
 
 [tasks."lint-scripts"]
 description = "shellcheck every script in scripts/, at warning severity"
@@ -116,4 +125,4 @@ run = [
 
 [tasks.install]
 description = "Build and install the vigil binary onto PATH"
-run = "scripts/with-crate.sh cargo install --path . --force"
+run = "cargo install --path . --force"

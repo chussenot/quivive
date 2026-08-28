@@ -1,17 +1,17 @@
 ---
 title: vigil specification
-status: draft
+status: active
 date: 2026-08-28
 description: What vigil computes — the readers, the per-agent state machine, the tick, and the ceilings a tick must meet.
 ---
 
 # vigil specification
 
-`status: draft` is accurate and load-bearing: this page specifies behaviour the
-crate does not implement yet. It is the target the implementation is written
-against, not a description of a binary you can run. When the crate lands, the
-parts of this page it satisfies become `active` and the parts it does not stay
-here as the remaining work.
+This page was written before the crate and is now implemented by it. Two things
+changed in the writing of the code, and both are recorded rather than quietly
+corrected: the third reader is a **worktree** reader rather than a git one (see
+below), and the ceilings are now measured numbers rather than intentions
+([docs/studies/conventions-run.md](studies/conventions-run.md)).
 
 One job: **say whether a fleet of coding agents is alive, right now, in one
 line.** Everything below is in service of that sentence, and anything that is not
@@ -26,19 +26,60 @@ normal repository, not a broken one.
 
 | Reader | Reads | Shape | Missing means |
 |---|---|---|---|
-| **ledger** | `.pact/events.jsonl` | append-only, streamed from a cursor | no pact in this repo — vigil has nothing to say and says so |
-| **lease** | `.pact/leases/` | small, mutable, read whole each tick | no agent currently holds a path |
-| **git** | `HEAD`, the index, the worktree | small, mutable, read whole each tick | not a git repository |
+| **ledger** | `.pact/events.jsonl` | append-only, streamed from a cursor | no pact in this repo — vigil has nothing to say and says so (`degraded: ["ledger"]`) |
+| **lease** | `.pact/leases/*.lock` | small, mutable, read whole each tick | no agent currently holds a path. **Not** degraded: nobody holding a path is a repository's resting state |
+| **worktree** | the mtime of each leased path | one `stat` per lease | nothing. A leased path that does not exist yet is the normal way to claim a file you are about to write |
 
 The ledger is the only streamed input, and the only one with a cursor. That
 asymmetry is deliberate and is explained in
 [ADR-0001](adr/0001-stream-first-tile.md#consequences): the other two are small
 and mutable, so a cursor over them would be a cache with nothing to gain.
 
-The git reader exists for one reason that is easy to miss: an agent can be very
-much alive and write nothing to the ledger for minutes at a stretch, because it is
-thinking or compiling. A dirty worktree under a path that agent holds a lease on
-is evidence of life that the ledger does not carry.
+The state directory is `<repo>/.pact`, or `PACT_STATE_DIR` when that is set —
+because pact honours it, and a repository whose state has been redirected is one
+where `<repo>/.pact` is empty. pact's *worktree-scope* redirection is deliberately
+not reimplemented: that would be a second copy of somebody else's resolution
+logic, and it would drift.
+
+### The worktree reader, and why it is not called the git reader
+
+An agent can be very much alive and write nothing to the ledger for minutes at a
+stretch, because it is thinking or compiling. Without a third reader, a compile
+longer than `--active-window` reports IDLE and one longer than `--idle-window`
+reports STALE — the tile crying wolf about the most normal thing an agent does.
+
+The first draft of this page called that reader **git**, because the surface it
+reads sounded like git's. Implementing it showed the liveness evidence is the
+filesystem's mtime and nothing else: no ref, no index, no `HEAD`. The page was
+renamed to match the code rather than the code bent to match the page.
+
+It is a near neighbour of the refusal in
+[D10](adr/0003-yagni-deferral-register.md) — no guessing at liveness from ambient
+machine state — and stays on the right side of it for two reasons worth stating
+rather than assuming. The mtime is a trace **the agent wrote**, not an inference
+about a process; and it is only ever read for a path the agent **explicitly
+claimed** with a lease, so vigil cannot credit one agent with another's work, or
+with a `git checkout`. A lease path that is absolute or contains `..` is ignored
+outright: a lock file is data on disk, and joining it onto the repository root
+would let it point vigil anywhere.
+
+### Which event kinds count as evidence
+
+Almost all of them, and three do not. This is not guessable from the field names;
+it comes from pact's own schema:
+
+* `expired` — the *sweeper* wrote the row, and its `agent` names the holder whose
+  claim ended, who by definition did nothing. Counting it would resurrect exactly
+  the agent that just went quiet.
+* `displaced` — same shape: the row belongs to the overridden holder, not to
+  whoever overrode it (who gets a `stolen` row of their own, which does count).
+* `annotation` — a correction pointing at earlier lines, authored in `actor`
+  rather than `agent`. A human annotating last week is not an agent working now.
+
+Anything else counts, **including a kind this version of vigil has never heard
+of**. That direction is the safe one: a new pact event kind works here the day
+pact ships it, and the cost of being wrong is reporting an agent alive one tick
+longer than it was.
 
 ## The state machine
 
@@ -50,17 +91,22 @@ thresholds, with lease expiry as the one non-recency input.
 stateDiagram-v2
     [*] --> ACTIVE: first event
 
-    ACTIVE --> IDLE: no evidence for<br/>--active-window (60s)
-    IDLE --> STALE: no evidence for<br/>--idle-window (5m)
-    STALE --> DEAD: no evidence for<br/>--dead-window (30m)
+    ACTIVE --> IDLE: no evidence for<br/>--active-window
+    IDLE --> STALE: no evidence for<br/>--idle-window
+    STALE --> DEAD: no evidence for<br/>--dead-window
 
     IDLE --> ACTIVE: new evidence
     STALE --> ACTIVE: new evidence
     DEAD --> ACTIVE: new evidence
 
     STALE --> DEAD: lease expired past grace,<br/>no event since
-    DEAD --> [*]: --forget after dead-window x 2
+    DEAD --> [*]: --forget (unless holding a lease)
 ```
+
+The default windows are four string constants in `src/state.rs`, parsed by both
+`Thresholds::default()` and clap — so `vigil tile --help` is where you look them
+up, and there is no second copy anywhere to go stale. They are not repeated here
+for that reason.
 
 | State | Means | Reading it |
 |---|---|---|
@@ -92,12 +138,12 @@ repository does not render forty dead names.
 
 ```mermaid
 flowchart LR
-    repo[("repository<br/>.pact/, .git/")]
+    repo[("repository<br/>.pact/ + leased paths")]
 
     subgraph readers["readers"]
         L["ledger<br/>(streamed from cursor)"]
-        S["lease"]
-        G["git"]
+        S["lease<br/>(read whole)"]
+        G["worktree<br/>(mtime of leased paths)"]
     end
 
     repo --> L
@@ -135,19 +181,23 @@ does and does not buy.
 
 ### Ceilings
 
-Two numbers, both release-profile, both measured by `mise run bench` against a
-synthetic ledger rather than asserted here:
+Two numbers, both release-profile, both enforced by `mise run bench` against a
+100,000-event synthetic ledger. The ceilings themselves live as constants in
+`tests/bench.rs` rather than being quoted here, so this page cannot drift from
+what is actually asserted.
 
-- **Warm tick** (cursor valid, a handful of new events): fast enough to run at
-  1 Hz without being noticeable, on a ledger of 100k events. This is the number
-  the whole design exists to make possible, and the number whose failure is the
-  reversal condition for [D2](adr/0003-yagni-deferral-register.md) — a daemon.
-- **Cold tick** (no cursor, full re-read of 100k events): slow is acceptable,
-  *wrong* is not. The cold path's job is to produce the same tile as the warm
-  path, and `mise run fleet` is what holds it to that.
+- **Warm tick** (cursor valid, a handful of new events). This is the number the
+  whole design exists to make possible, and its failure is the documented
+  reversal condition for [D2](adr/0003-yagni-deferral-register.md) — a daemon. A
+  genuine failure here is an ADR conversation, not a tuning exercise.
+- **Cold tick** (no cursor, full re-read). Slow is acceptable; *wrong* is not.
+  The cold path's job is to produce the same tile as the warm path, and
+  `mise run fleet` is what holds it to that.
 
-A bench run that needs a `sleep`, or a golden that does, is a report that the tick
-has stopped being a pure function.
+The measured values, and the ratio between them, are in
+[docs/studies/conventions-run.md](studies/conventions-run.md). A bench run that
+needs a `sleep`, or a golden that does, is a report that the tick has stopped
+being a pure function.
 
 ## What vigil refuses
 

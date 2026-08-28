@@ -29,10 +29,16 @@ This file has **two layers**, and both are required by
 
 ## Unreleased
 
-No release yet. There is no crate to version: this repository's conventions,
-decision records and specification landed first, deliberately, and
-[docs/studies/conventions-run.md](docs/studies/conventions-run.md) records what
-that bought and what it cost.
+No release yet, and no tag. The crate exists and `mise run check` is green, but
+nothing here has been used on a real bar during a real fleet run, which is the
+only evidence that would justify calling a version 0.1.0.
+
+Order of construction, since it is unusual and deliberate: the house conventions
+and the docs gate landed first, then the decision records, then the specification
+and the tile contract — and only then the crate, which implemented the contract
+unchanged. [docs/studies/conventions-run.md](docs/studies/conventions-run.md)
+records what that bought, what it cost, and the six times during both runs that a
+check passed for a reason other than the one claimed.
 
 The first release will be cut with `cog bump` — never by editing a version by
 hand — and will carry the first Notes paragraph.

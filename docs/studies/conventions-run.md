@@ -2,15 +2,21 @@
 title: Proving the conventions before the code
 status: active
 date: 2026-08-28
-description: Field notes from the run that established this repository's conventions — what the docs gate was measured against, what the measurement found in itself, and what stayed unproven.
+description: Field notes from the two runs that built this repository — what each gate was measured against, the six times a check passed for the wrong reason, and what is still unproven.
 ---
 
 # Proving the conventions before the code
 
 This repository's conventions, decision records and specification landed before
 its Rust crate did. That ordering was deliberate, and this page is the evidence
-from that run: what was actually measured, what the measurement found, and what is
-still only asserted.
+from both runs: what was actually measured, what the measurements found, and what
+is still only asserted.
+
+**The recurring finding is not about vigil.** Six times across the two runs, a
+check passed for a reason other than the one claimed — and in five of those the
+green result was reported before anybody noticed. They are each recorded below
+where they happened, and collected at the end, because the pattern is more useful
+than any of the instances.
 
 The genre is pact's `docs/studies/`: field notes, not a tutorial. A study is
 allowed to report that nothing was learned. It is not allowed to report a number
@@ -24,11 +30,20 @@ reverse. A convention introduced on day 40 has to be applied retroactively to 40
 days of files by somebody who did not write them, and the usual outcome is that
 the rule gets narrowed until it fits what already exists.
 
-The cost of the ordering is honest and worth naming: **every cargo gate in
-`mise.toml` is unexercised.** `fmt-check`, `lint`, `test`, `tile-goldens`, `bench`
-and `fleet` are written exactly as they will run, and today every one of them
-prints `with-crate: SKIPPED` and exits 0. They are prose until the crate lands.
-Nothing in this run tested them, and this page does not claim otherwise.
+While that was true, the cost was worth naming plainly: **every cargo gate in
+`mise.toml` was unexercised.** `fmt-check`, `lint`, `test`, `tile-goldens`, `bench`
+and `fleet` were written exactly as they would run, and every one of them printed
+`with-crate: SKIPPED` and exited 0. They were prose.
+
+They are not any more — experiments 4 to 7 are those gates running — and the
+`with-crate.sh` guard that made them green on an empty repository has removed
+itself, as it was built to.
+
+The ordering paid for itself in one specific way worth recording: **the tile
+contract was written before the code and implemented unchanged.** Not because the
+first guess was lucky, but because writing down what the output had to be left the
+goldens something to be golden against, so the shape was argued about once, in
+prose, instead of drifting field by field.
 
 ## Experiment 1 — seeded breakage against the docs gate
 
@@ -162,25 +177,176 @@ committed. Twice in one run, the same mistake: **an exit code is not evidence
 about the thing you are testing.** Reading the message rather than the status is
 what caught it both times.
 
+## Experiment 4 — the invariant against real pact ledgers
+
+**Question.** Does the resume cursor actually satisfy
+[ADR-0001](../adr/0001-stream-first-tile.md) — delete it, re-read, get a
+byte-identical tile — on a ledger nobody wrote for the purpose?
+
+**Method.** pact's own committed `.pact/events.jsonl` (729 lines, 246 KiB) and
+recount's (308 lines, 135 KiB). With `VIGIL_NOW` frozen, three reads: a cold one
+(no cursor on disk), a warm one (resuming the cursor the cold read left), and a
+forced cold one (`--no-cursor`).
+
+**Result.** All three byte-identical. The cursor consumed 251,425 of 251,425
+bytes. **Zero declined lines across 1,037 real rows**, which is the number that
+says the reader understands the format rather than tolerating it.
+
+The corpus is also what taught the reader two things a fixture would not have:
+pact's rows carry fields vigil has never heard of (`chain_hash`, `invoked_from`,
+`scope`, `context_key`) and a `kind` — `context` — that is not in any list vigil
+was written against. Both are read correctly, and both are read correctly *because
+the reader was written to ignore what it does not recognise* rather than to
+enumerate what it does.
+
+## Experiment 5 — the per-tick ceilings
+
+**Question.** Is a streamed fold actually cheap enough to make the whole design
+work? Its failure is the documented reversal condition for
+[D2](../adr/0003-yagni-deferral-register.md) — a daemon — so this is the number
+the architecture rests on.
+
+**Method.** `mise run bench`: a 100,000-event synthetic ledger (14.7 MiB, 64
+agents), release profile, four timings.
+
+| Tick | Time |
+|---|---|
+| cold (full re-read of 100,000 events) | 50.6 ms |
+| warm, nothing appended | 157 µs |
+| warm, 8 events appended | 115 µs |
+| forced cold, for the ratio | 49.2 ms |
+
+**Speedup, cold to warm: 426x.** At 1 Hz a warm tick is roughly one ten-thousandth
+of the interval, which is the margin that makes "call it every second forever"
+a reasonable thing to ask of a status bar. The daemon in D2 would buy latency
+nobody can perceive, and the row stays where it is.
+
+The bench refuses to assert under `debug_assertions`, which is not ceremony: the
+same fold in debug is slow enough to fail these ceilings by more than an order of
+magnitude, and a gate that fails for the profile is a gate somebody deletes.
+
+## Experiment 6 — the fleet soak, and two negative controls it failed
+
+**Question.** The invariant holds over fixtures the test author wrote and over
+static real ledgers. Does it hold over a cursor advanced, tick by tick, through
+writes it did not control?
+
+**Method.** `scripts/fleet-sim.sh`: eight concurrent writers appending in pact's
+shape, 30 ticks, two injected rewrites (pact compacts `events.jsonl` to its newest
+4000 lines once it passes 5000, so a rewrite is routine here, not exotic). Then
+writers stop, the clock freezes, and the warm tile is compared against a cold one.
+
+**Result on the real binary.** Passes: no tick reported a decline, and warm, cold
+and re-cold agree.
+
+**And that result meant nothing, twice.** The negative control — a build whose
+cursor trusted its byte offset without verifying the tail — sailed through two
+drafts of this script.
+
+*Draft one* ran all eight writers for the whole run. The fold keeps only the
+**newest** evidence per agent, so a resumed read that skips events in the middle
+of the file arrives at the same maximum as a cold read. **Skipping is invisible to
+a max.** Every writer being active meant every agent's newest event survived every
+rewrite, and there was nothing for the comparison to find.
+
+*Draft two* silenced half the writers, so a rewrite would drop their lines
+entirely and a stale accumulator would show up as extra agents. It still passed —
+because the silencing happened *before* the first rewrite, and that rewrite shrank
+the file below the cursor's offset, which even a trusting cursor notices. The
+accumulator was reset before it had anything stale in it.
+
+The scenario that discriminates needs three things in this order:
+
+1. a rewrite the cursor **does** notice, which resets the accumulator;
+2. agents that then go quiet, so the accumulator learns them;
+3. a rewrite that drops those agents' lines and then **grows the file back past
+   the cursor's old offset**, so a length comparison cannot notice.
+
+Only then does a cold read fail to know the quiet agents exist while a trusting
+cursor still carries them. With that ordering the negative control fails, loudly,
+naming the four agents the warm tile invented. The script's header carries the
+reasoning so the tick numbers in it are not tidied away as arbitrary.
+
+**What this says about the invariant.** It holds. It also says the fold's
+insensitivity to skipped middle events is a real property of the design and not
+an accident — which is reassuring for correctness and is exactly what made it hard
+to test.
+
+## Experiment 7 — what the suites found in the code
+
+Two findings from writing tests rather than from running them, both recorded
+because neither would have survived to a user without them.
+
+**A panic reachable from a file on disk.** `a_lock_with_an_absurd_ttl_does_not_panic`
+failed on first run. `chrono::TimeDelta::seconds` **panics** out of range rather
+than saturating, which the code had assumed the other way round; `ttl_secs` is a
+`u64` read from a lock file, so a garbage value crashed the tick. A panic is the
+one failure mode a status bar cannot survive. The same audit found a second
+instance: subtracting two `DateTime`s panics when the span exceeds i64
+milliseconds, and two timestamps chrono will happily parse can be 500,000 years
+apart. Both are now epoch-second arithmetic, which cannot overflow.
+
+**Drift the auditor role was written to catch, committed in the same session.**
+The four window defaults existed as literals in *two* places — `Duration::from_secs(60)`
+in `src/state.rs` and `default_value = "60s"` in `src/cli.rs` — with nothing
+connecting them. Writing `.claude/agents/cli-surface-auditor.md`, whose whole
+subject is defaults quoted in a second place, is what exposed it. They are now
+four string consts that clap renders and `Thresholds::default()` parses, so there
+is one source; and the numbers were deleted from `docs/spec.md`'s Mermaid diagram
+labels, which was a third copy.
+
+## The six times a check passed for the wrong reason
+
+Collected, because the pattern is worth more than the instances:
+
+| # | Where | The green result was really |
+|---|---|---|
+| 1 | Experiment 1, first harness | six trials with the seeded defect undetected — the tree had one unrelated pre-existing failure and the harness only checked the exit code |
+| 2 | Experiment 1, corrected harness | two trials failing on backticks inside a double-quoted shell string, evaluated as commands — the gate had caught both defects |
+| 3 | Experiment 3, first negative control | a config parse error, on a clone taken before the config fix — not the bad commit subject |
+| 4 | The first cursor comparison | wall-clock drift between two runs of a **stale binary** — `cargo clippy` checks without rebuilding, so the new code was never in it |
+| 5 | Experiment 6, soak draft one | a comparison that could not have differed: the fold is a max, and skipping is invisible to a max |
+| 6 | Experiment 6, soak draft two | the same, one step subtler: the accumulator was reset before it had anything stale in it |
+
+A seventh, which cost a wrong conclusion rather than a wrong pass: `cargo test`
+stops after the first test **binary** that fails, so a seeded defect looked like it
+was caught by a unit test and missed by the goldens, when the goldens had simply
+never run. `mise run test` now passes `--no-fail-fast`.
+
+Two defences worked, and nothing else did:
+
+* **Read the message, not the exit code.** Every trial now asserts the specific
+  finding it expects. This caught 1, 2 and 3.
+* **Break it on purpose.** A negative control — seed the defect in a throwaway
+  copy, confirm the check goes red — caught 5 and 6, and is the only thing that
+  could have. It is now named in
+  [docs/conventions.md](../conventions.md#what-is-not-gated) as an ungated
+  responsibility, because nothing can enforce it.
+
+Number 4 was caught by neither, and by luck: the frozen clock in the output did
+not match the frozen clock that was passed in. It is the argument for the
+`VIGIL_NOW` seam being visible in the tile at all.
+
 ## What this run leaves unproven
 
 Said plainly, because a study that only reports its successes is an advertisement:
 
-- **Every cargo gate.** Unexercised, as above.
-- **The resume-cursor invariant** — that deleting the cursor and re-reading
-  produces a byte-identical tile — is the load-bearing claim of
-  [ADR-0001](../adr/0001-stream-first-tile.md) and is at present a sentence.
-  `mise run fleet` is written to measure it and has never run.
-- **The per-tick ceilings** in [docs/spec.md](../spec.md#the-tick) are targets, not
-  measurements. No number in this repository came from a profiler.
 - **`mise run lint-scripts`.** shellcheck could not be obtained in the
   environment this run happened in — the binary download returns 403 — so the two
   scripts were reviewed by hand against the warning-severity rules and are
   otherwise unverified. It is a required leg of `mise run check`, so the first CI
   run is its first real execution. If it is red, that is this note being cashed.
 - **`mise run check` as a whole.** mise itself was not installed here. Each leg
-  was invoked directly; the composition was not.
+  was invoked directly, in the order the task lists them; the composition was not.
 - **The two-layer changelog** has no release to demonstrate it on.
+- **Anything outside Linux.** No platform matrix, no MSRV promise, no published
+  binary — and that is [D9](../adr/0003-yagni-deferral-register.md) rather than an
+  oversight. The toolchain pin in `rust-toolchain.toml` is the only promise made.
+- **Whether the tile is a good tile.** Everything above is about whether vigil
+  computes what it says it computes. Whether one line of `3A 3I 1S 1D
+  worst=dead …` is the *right* line for somebody watching a fleet is a question no
+  test in this repository can answer, and the honest next step is to run it on a
+  real bar during a real fleet run and see what gets looked at.
 
 Each of those is a thing to come back and fill in. The first release's Notes
 paragraph is the natural place to say which of them turned out to be true.

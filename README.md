@@ -14,11 +14,11 @@ cheaply enough to put on a status bar and leave there.
 The repository is `quivive` — *être sur le qui-vive*, to be on the alert. The tool
 it holds is `vigil`.
 
-> **State of the work:** the conventions, the decisions and the specification are
-> written; the crate is not. Pages describing behaviour that does not exist yet say
-> `status: draft` in their front matter, and
-> [docs/studies/conventions-run.md](docs/studies/conventions-run.md) explains why
-> that order was chosen. Nothing below is a description of a binary you can run.
+> **State of the work:** the crate is built and does what this page describes —
+> `mise run check` is green, and the design's load-bearing invariant is asserted
+> against real pact ledgers and against concurrent writers. Unreleased: there is no
+> tag, no published binary, and no cross-platform promise
+> ([D9](docs/adr/0003-yagni-deferral-register.md)). Build it with `mise run build`.
 
 ## The problem
 
@@ -116,8 +116,18 @@ vigil's conventions came before its code, on purpose. The [house
 conventions](docs/conventions.md) — mise as the only task runner, cocogitto owning
 the version and changelog, front matter on every page, priced alternatives in every
 ADR — were established and *proven against a seeded-breakage run* before a line of
-Rust existed, and the notes from that run are in
-[docs/studies/conventions-run.md](docs/studies/conventions-run.md).
+Rust existed. The [spec](docs/spec.md) and the [tile
+contract](docs/tile-contract.md) were written next, and the contract was then
+implemented unchanged, which was the point of writing it first: the goldens had
+something to be golden against.
+
+The [field notes](docs/studies/conventions-run.md) from both runs are worth more
+than that summary suggests, because the recurring finding was not about vigil. Six
+times, a check passed for a reason other than the one claimed — a gate red for an
+unrelated cause, a negative control that failed on a config error, a stale binary,
+a soak test that a deliberately broken cursor sailed through twice. Every one was
+caught by reading the message instead of the exit code, or by breaking the thing
+on purpose to see the check go red.
 
 The pattern is inherited: pact and recount are built the same way, and this
 repository ports two of their roles outright.
