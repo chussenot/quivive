@@ -11,7 +11,7 @@ use serde::Deserialize;
 
 pub const LEASES_DIR: &str = "leases";
 
-/// pact's lock-file shape, narrowed to what vigil reads. The remaining
+/// pact's lock-file shape, narrowed to what quivive reads. The remaining
 /// fields — `note`, `branch`, `worktree`, `invoked_from`, the at-acquire blob id —
 /// are informational and ignored.
 #[derive(Deserialize)]
@@ -27,7 +27,7 @@ pub struct Lease {
     pub agent: String,
     /// Repo-relative, as pact recorded it — not decoded from the lock filename.
     /// pact encodes the path into the filename and *also* stores it in the file;
-    /// reading the field means vigil does not have to reimplement, and then keep
+    /// reading the field means quivive does not have to reimplement, and then keep
     /// up with, somebody else's escaping.
     pub path: String,
     pub acquired_at: DateTime<Utc>,

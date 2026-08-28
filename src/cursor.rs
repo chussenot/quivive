@@ -22,7 +22,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 /// Inside the pact state directory, beside the ledger it points into. It lives
-/// there rather than in a directory of vigil's own because `.pact/` is already
+/// there rather than in a directory of quivive's own because `.pact/` is already
 /// gitignored and already the place this repository's coordination state lives;
 /// a second dot-directory for one cache file is not worth the clutter.
 ///
@@ -116,7 +116,7 @@ impl Cursor {
 /// compares one short line against the same short line, and the cost of a
 /// collision is a tile computed from a resumed read that should have been cold —
 /// which the next tick corrects. pact's ledger has its own real chain hash for
-/// the job that needs one (forgery), and vigil deliberately does not duplicate it.
+/// the job that needs one (forgery), and quivive deliberately does not duplicate it.
 pub fn hash(bytes: &[u8]) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in bytes {

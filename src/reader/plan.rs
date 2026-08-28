@@ -1,19 +1,19 @@
 //! The plan reader: `.pact/plan.json`, pact's linted snapshot of a wave plan.
 //!
 //! Written once, by `pact plan lint`, only when the lint found no *errors* —
-//! never by vigil, and never incrementally. A tick either sees the last clean
+//! never by quivive, and never incrementally. A tick either sees the last clean
 //! lint's graph whole, or it sees nothing; there is no cursor here because
 //! there is nothing to stream, matching the lease and activity readers'
 //! reasoning in `docs/adr/0001-stream-first-tile.md`.
 //!
 //! ## Why the shape mirrors pact's own `Snapshot` field for field
 //!
-//! This is pact's file, not vigil's, so the struct below is deliberately a
+//! This is pact's file, not quivive's, so the struct below is deliberately a
 //! narrow copy of `pact::plan::Snapshot` rather than an independent guess at
 //! what a plan "should" look like. Divergence here would be silent: pact bumps
 //! nothing when it adds a field, because `.pact/plan.json` is a private
 //! contract with `pact audit`'s `gate-order` check and `pact handoff`, not a
-//! versioned wire format vigil is entitled to assume stability from. Reading
+//! versioned wire format quivive is entitled to assume stability from. Reading
 //! only the fields both `waves` and `gates` need keeps this reader working
 //! across a pact upgrade the same way `ledger::Row` keeps working across new
 //! event kinds — by not caring about the rest.
@@ -52,8 +52,8 @@ pub struct Reading {
     /// 1 when the file exists but did not parse as a `Snapshot`, 0 otherwise.
     /// Not a per-line count — this is one JSON object, not a log — but reported
     /// as `declined` for the same reason every other reader counts rather than
-    /// swallows: a plan vigil could not read is not silence, and `pact plan
-    /// lint` having moved the schema out from under an old vigil is exactly the
+    /// swallows: a plan quivive could not read is not silence, and `pact plan
+    /// lint` having moved the schema out from under an old quivive is exactly the
     /// case a decline count exists to surface.
     pub declined: usize,
     /// False when there is no plan at all: a repository nobody has run

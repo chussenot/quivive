@@ -9,7 +9,7 @@
 //!   `docs/adr/0001-stream-first-tile.md` — and the fix would be in the fold, not
 //!   in the test.
 //! * **Fixtures are written as pact writes them.** The rows below carry pact's
-//!   real field names, including the ones vigil ignores, because a fixture that
+//!   real field names, including the ones quivive ignores, because a fixture that
 //!   only contains the fields the reader happens to look at asserts what its
 //!   author already believed.
 //!

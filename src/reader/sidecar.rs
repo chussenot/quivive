@@ -36,10 +36,10 @@ use serde::Deserialize;
 
 pub const SIDECAR_FILE: &str = "interactions.jsonl";
 
-/// bd's shape, narrowed to what vigil reads. `id` (bd's own row id) is not
+/// bd's shape, narrowed to what quivive reads. `id` (bd's own row id) is not
 /// carried forward: the 1-based line number in [`Row::line`] is what `why`
 /// (`S21`) cites as the evidence location, in the same "file plus line" form
-/// the ledger's declines are reported in, and it is vigil's own coordinate
+/// the ledger's declines are reported in, and it is quivive's own coordinate
 /// rather than a fact bd recorded.
 #[derive(Deserialize)]
 struct Raw {

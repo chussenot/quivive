@@ -1,7 +1,7 @@
 //! The ledger reader: pact's `.pact/events.jsonl`, streamed forward from a
 //! cursor.
 //!
-//! This is the only streamed input vigil has, and the only one with a cursor.
+//! This is the only streamed input quivive has, and the only one with a cursor.
 //! The other two surfaces are small and mutable, so a cursor over them would be
 //! a cache with nothing to gain (`docs/adr/0001-stream-first-tile.md`).
 
@@ -16,7 +16,7 @@ use crate::cursor::{self, Cursor};
 
 pub const LEDGER_FILE: &str = "events.jsonl";
 
-/// One row of pact's lease event log, narrowed to the fields vigil reads.
+/// One row of pact's lease event log, narrowed to the fields quivive reads.
 ///
 /// serde ignores the rest — `path`, `detail`, `ttl_secs`, `covers_lines`,
 /// `actor`, `displaced`, `chain` — and that is deliberate rather than lazy:
@@ -42,7 +42,7 @@ struct Row {
 ///
 /// Almost all of them do, and three do not. This is not a detail that could be
 /// guessed from the field names; it comes from pact's own schema documentation in
-/// `src/events.rs`, and getting it wrong would make vigil report dead agents as
+/// `src/events.rs`, and getting it wrong would make quivive report dead agents as
 /// alive — the single most misleading thing it could say.
 ///
 /// * `expired` — a TTL ran out and *the sweeper* wrote the row. The `agent` field
@@ -55,7 +55,7 @@ struct Row {
 ///   author in `actor` rather than `agent`. A human annotating last week's
 ///   history is not an agent working now.
 ///
-/// Anything else, including a kind this version of vigil has never heard of,
+/// Anything else, including a kind this version of quivive has never heard of,
 /// counts. That direction is the safe one: a new pact event kind starts working
 /// here on the day pact ships it, and the cost of being wrong is reporting an
 /// agent as alive one tick longer than it was.
