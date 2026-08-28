@@ -2,7 +2,7 @@
 title: Decision records
 status: active
 date: 2026-08-28
-description: Index of vigil's architecture decision records — what was decided, when, and which record supersedes which.
+description: Index of quivive's architecture decision records — what was decided, when, and which record supersedes which.
 ---
 
 # Decision records
@@ -22,7 +22,7 @@ which names it in `supersedes:`; the old one changes only its `status` to
 | # | Decision | Status |
 |---|---|---|
 | 0001 | [The tile is a fold over a streamed ledger, not a query against an index](0001-stream-first-tile.md) | active |
-| 0002 | [No daemon, and vigil does not draw](0002-no-daemon-renderer-boundary.md) | active |
+| 0002 | [No daemon, and quivive does not draw](0002-no-daemon-renderer-boundary.md) | active |
 | 0003 | [The YAGNI deferral register](0003-yagni-deferral-register.md) | active |
 
 ## Reading order
@@ -33,5 +33,5 @@ absence of a daemon is what forbids hiding a slow fold behind a cache. 0003 is
 the boundary the other two imply, written down with reversal conditions so it can
 be argued with.
 
-Start with 0002 if you want to know **what vigil is**; start with 0001 if you
+Start with 0002 if you want to know **what quivive is**; start with 0001 if you
 want to know **why it can be that**.
