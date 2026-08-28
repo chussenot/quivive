@@ -18,6 +18,7 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 
 use crate::state::{ACTIVE_DEFAULT, DEAD_DEFAULT, FORGET_DEFAULT, IDLE_DEFAULT, State};
+use crate::watch;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -62,7 +63,20 @@ pub enum Command {
     /// serves no second consumer. See docs/adr/0002-no-daemon-renderer-boundary.md.
     /// Fires on TRANSITIONS only — an event fires when it becomes true, not while
     /// it stays true (docs/spec.md S14).
-    Watch {},
+    Watch {
+        /// How often to re-check the registry for new evidence. Every repo
+        /// unchanged since its last read (docs/spec.md S5) is skipped
+        /// without a real read, so this mostly governs how quickly a
+        /// genuine change is noticed, not how much work each pass does.
+        #[arg(long, default_value = watch::INTERVAL_DEFAULT, value_name = "DURATION")]
+        interval: String,
+
+        /// Suppress a repeat notification for the same (repo, event) inside
+        /// this window, so a condition flapping true/false/true notifies
+        /// once (docs/spec.md S15).
+        #[arg(long, default_value = watch::DEBOUNCE_DEFAULT, value_name = "DURATION")]
+        debounce: String,
+    },
     /// List the attention-worthy items for one repo, each with the evidence
     /// line(s) that produced it (docs/spec.md S21).
     Why {
@@ -113,7 +127,7 @@ pub struct Common {
     ///
     /// The fastest diagnostic here. If the tile changes when you pass this, the
     /// cursor is wrong; if it does not, the bug is in the fold or the readers.
-    /// Deleting .pact/vigil-cursor.json by hand does the same thing and must
+    /// Deleting .pact/quivive-cursor.json by hand does the same thing and must
     /// always be safe.
     #[arg(long)]
     pub no_cursor: bool,

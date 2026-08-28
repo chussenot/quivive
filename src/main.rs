@@ -51,9 +51,12 @@ fn run(cli: Cli) -> Result<i32> {
                 tick_once(&common)
             }
         }
-        Command::Watch {} => {
-            // Stubbed until quivive-8mq.
-            quivive::watch::run()?;
+        Command::Watch { interval, debounce } => {
+            let opts = quivive::watch::WatchOptions {
+                interval: dur::parse(&interval)?,
+                debounce: dur::parse(&debounce)?,
+            };
+            quivive::watch::run(&opts)?;
             Ok(EXIT_OK)
         }
         Command::Why { repo, json } => {
