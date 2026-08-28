@@ -1,10 +1,11 @@
 //! The command surface.
 //!
-//! Every value list here is rendered by clap from the type that defines it —
-//! `--exit-on` from [`State`], the shells from `clap_complete::Shell` — so
-//! `--help` cannot offer something the parser rejects, or omit something it
-//! accepts. That is the permanent fix for a drifting list, and it is the drift
-//! the `cli-surface-auditor` role exists to catch elsewhere.
+//! docs/spec.md S22 is verbatim: "The whole CLI is: tile, watch, why." Every
+//! value list here is rendered by clap from the type that defines it —
+//! `--exit-on` from [`State`] — so `--help` cannot offer something the parser
+//! rejects, or omit something it accepts. That is the permanent fix for a
+//! drifting list, and it is the drift the `cli-surface-auditor` role exists to
+//! catch elsewhere.
 //!
 //! Defaults are NOT written here either. The four window defaults live as string
 //! consts in [`crate::state`], where `Thresholds::default()` parses the same
@@ -15,29 +16,28 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
-use clap_complete::Shell;
 
 use crate::state::{ACTIVE_DEFAULT, DEAD_DEFAULT, FORGET_DEFAULT, IDLE_DEFAULT, State};
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "vigil",
+    name = "quivive",
     about = "Is the fleet alive, right now?",
     long_about = "Folds pact's lease ledger into one line describing the fleet now.\n\n\
-                  Designed to be called on a timer by a status bar: `vigil tile` reads, \
-                  prints one tile and exits. There is no daemon, and vigil does not draw — \
+                  Designed to be called on a timer by a status bar: `quivive tile` reads, \
+                  prints one tile and exits. There is no daemon, and quivive does not draw — \
                   it emits the contract in docs/tile-contract.md and the bar renders it.",
     after_long_help = "EXIT CODES\n  \
         0  a tile was produced, including a quiet or degraded one\n  \
         1  no tile could be produced (bad flags, unreadable --repo)\n  \
         2  --exit-on was given and the tile met or exceeded that state\n\n\
         EXAMPLES\n  \
-        vigil tile                         one line, this repository\n  \
-        vigil tile --json                  the full contract\n  \
-        vigil tile --no-cursor             force a full re-read; the fastest cursor diagnostic\n  \
-        vigil watch --interval 2s          one tile per tick on stdout\n  \
-        vigil tile --exit-on dead || notify-send 'fleet down'\n  \
-        vigil tile --dead-window 2h        a fleet whose beads take an hour",
+        quivive tile                         one line, this repository\n  \
+        quivive tile --json                  the full contract\n  \
+        quivive tile --no-cursor             force a full re-read; the fastest cursor diagnostic\n  \
+        quivive why .                        the attention items behind the tile\n  \
+        quivive tile --exit-on dead || notify-send 'fleet down'\n  \
+        quivive tile --dead-window 2h        a fleet whose beads take an hour",
     version
 )]
 pub struct Cli {
@@ -51,24 +51,27 @@ pub enum Command {
     Tile {
         #[command(flatten)]
         common: Common,
+        /// Follow the pwetty push contract instead of printing once: emit one
+        /// JSON line per change and stay alive. See docs/spec.md S9.
+        #[arg(long)]
+        stream: bool,
     },
-    /// Print one tile per tick, on stdout, until interrupted.
+    /// Send `notify-send` notifications on fleet transitions, until interrupted.
     ///
     /// Not a daemon: foreground, owned by whoever started it, binds no socket and
-    /// serves no second consumer. When it dies the pipe closes and its consumer
-    /// finds out immediately, which is precisely what a daemon does not do. See
-    /// docs/adr/0002-no-daemon-renderer-boundary.md.
-    Watch {
-        #[command(flatten)]
-        common: Common,
-        /// How long to wait between ticks.
-        #[arg(long, default_value = "1s", value_name = "DURATION")]
-        interval: String,
-    },
-    /// Write a shell completion script to stdout.
-    Completion {
-        #[arg(value_name = "SHELL")]
-        shell: Shell,
+    /// serves no second consumer. See docs/adr/0002-no-daemon-renderer-boundary.md.
+    /// Fires on TRANSITIONS only — an event fires when it becomes true, not while
+    /// it stays true (docs/spec.md S14).
+    Watch {},
+    /// List the attention-worthy items for one repo, each with the evidence
+    /// line(s) that produced it (docs/spec.md S21).
+    Why {
+        /// The repository to describe.
+        #[arg(value_name = "REPO")]
+        repo: PathBuf,
+        /// Emit the items as JSON instead of the text form.
+        #[arg(long)]
+        json: bool,
     },
 }
 
