@@ -20,9 +20,9 @@ mod support;
 
 use std::path::PathBuf;
 
+use quivive::state::Thresholds;
+use quivive::tile::Tile;
 use support::Fixture;
-use vigil::state::Thresholds;
-use vigil::tile::Tile;
 
 fn golden_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/goldens")
@@ -251,7 +251,7 @@ fn an_idle_tick_keeps_the_cursor_usable() {
     let f = Fixture::new();
     f.event("agent-1", "acquired", 10);
     let _ = f.tile(true, &thresholds);
-    let first = vigil::cursor::load(&f.root().join(".pact")).unwrap();
+    let first = quivive::cursor::load(&f.root().join(".pact")).unwrap();
     assert!(first.tail_len > 0);
 
     assert!(
@@ -259,7 +259,7 @@ fn an_idle_tick_keeps_the_cursor_usable() {
         "a tick with a valid cursor must not be a cold read"
     );
     let _ = f.tile(true, &thresholds); // nothing appended
-    let second = vigil::cursor::load(&f.root().join(".pact")).unwrap();
+    let second = quivive::cursor::load(&f.root().join(".pact")).unwrap();
     assert_eq!(second.offset, first.offset);
     assert_eq!(
         second.tail_len, first.tail_len,
