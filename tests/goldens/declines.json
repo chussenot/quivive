@@ -1,0 +1,25 @@
+{
+  "v": 1,
+  "at": "2026-08-28T09:00:00Z",
+  "repo": "REPO",
+  "fleet": {
+    "active": 1,
+    "idle": 0,
+    "stale": 0,
+    "dead": 0,
+    "total": 1
+  },
+  "worst": "active",
+  "agents": [
+    {
+      "id": "agent-1",
+      "state": "active",
+      "age_s": 10,
+      "leases": []
+    }
+  ],
+  "blocked_leases": [],
+  "degraded": [
+    "ledger: 3 unparsable line(s)"
+  ]
+}

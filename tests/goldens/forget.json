@@ -1,0 +1,31 @@
+{
+  "v": 1,
+  "at": "2026-08-28T09:00:00Z",
+  "repo": "REPO",
+  "fleet": {
+    "active": 0,
+    "idle": 0,
+    "stale": 0,
+    "dead": 1,
+    "total": 1
+  },
+  "worst": "dead",
+  "agents": [
+    {
+      "id": "long-gone-but-holding",
+      "state": "dead",
+      "age_s": 100000,
+      "leases": [
+        "src/state.rs"
+      ]
+    }
+  ],
+  "blocked_leases": [
+    {
+      "path": "src/state.rs",
+      "held_by": "long-gone-but-holding",
+      "expired_s": 99100
+    }
+  ],
+  "degraded": []
+}

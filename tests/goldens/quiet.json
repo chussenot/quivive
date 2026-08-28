@@ -1,0 +1,16 @@
+{
+  "v": 1,
+  "at": "2026-08-28T09:00:00Z",
+  "repo": "REPO",
+  "fleet": {
+    "active": 0,
+    "idle": 0,
+    "stale": 0,
+    "dead": 0,
+    "total": 0
+  },
+  "worst": "quiet",
+  "agents": [],
+  "blocked_leases": [],
+  "degraded": []
+}

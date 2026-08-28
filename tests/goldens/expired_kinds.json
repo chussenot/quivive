@@ -1,0 +1,35 @@
+{
+  "v": 1,
+  "at": "2026-08-28T09:00:00Z",
+  "repo": "REPO",
+  "fleet": {
+    "active": 1,
+    "idle": 0,
+    "stale": 0,
+    "dead": 2,
+    "total": 3
+  },
+  "worst": "dead",
+  "agents": [
+    {
+      "id": "ghost",
+      "state": "dead",
+      "age_s": 3000,
+      "leases": []
+    },
+    {
+      "id": "ghost-2",
+      "state": "dead",
+      "age_s": 3000,
+      "leases": []
+    },
+    {
+      "id": "live",
+      "state": "active",
+      "age_s": 1,
+      "leases": []
+    }
+  ],
+  "blocked_leases": [],
+  "degraded": []
+}
