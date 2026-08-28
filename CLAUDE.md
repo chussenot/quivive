@@ -37,7 +37,7 @@ cursor, so the tick numbers in it are the experiment and not decoration.
 
 ## The one invariant
 
-**Deleting `.pact/vigil-cursor.json` and re-running must produce a byte-identical
+**Deleting `.pact/quivive-cursor.json` and re-running must produce a byte-identical
 tile.** Everything in `src/` is in service of that sentence
 ([ADR-0001](docs/adr/0001-stream-first-tile.md)). `--no-cursor` is the fastest
 diagnostic in the repository: if the tile changes when you pass it, the cursor is
@@ -77,7 +77,7 @@ discipline as code.
 ## Where the design lives
 
 [docs/adr/](docs/adr/README.md) holds the decisions, with alternatives priced.
-Before proposing anything vigil currently refuses, check the
+Before proposing anything quivive currently refuses, check the
 [deferral register](docs/adr/0003-yagni-deferral-register.md): the row probably
 exists, and it names the condition that would reverse it.
 
