@@ -1,0 +1,4 @@
+/target
+# Worktrees a fleet creates for parallel beads. `wt/` is the house location, so
+# it is ignored here rather than in every developer's global config.
+/wt

@@ -1,0 +1,114 @@
+# The task runner. There is no Makefile, deliberately: CI invokes these same
+# tasks, so `mise run check` locally and the `check` job in CI are the same
+# commands, and a local gate that does not match CI is not a gate.
+#
+# See docs/conventions.md for the rules these tasks enforce, and
+# docs/adr/ for the decisions they are enforcing.
+
+# No `[tools] rust` here, deliberately. rust-toolchain.toml is the single place
+# the compiler version is decided, and rustup honours it automatically on the
+# first cargo invocation — including in CI. Pinning rust here as well would make
+# two files that can disagree about the toolchain, which is the exact failure the
+# pin exists to prevent, one level up.
+
+[tasks.build]
+description = "Build the vigil binary"
+run = "scripts/with-crate.sh cargo build"
+
+[tasks.test]
+description = "Run the whole suite: unit, reader fixtures, tile goldens"
+# One leg, because vigil has one build. There are no cargo features to pair off:
+# docs/adr/0003-yagni-deferral-register.md refuses a TUI, a daemon, network and
+# persistence, so there is nothing to gate — and a two-way all-features/default
+# leg here would be ceremony guarding nothing.
+run = "scripts/with-crate.sh cargo test"
+
+[tasks."tile-goldens"]
+description = "Re-check the tile contract against its goldens (see docs/tile-contract.md)"
+# A task of its own, not just part of `test`, because it is the one gate that
+# fails on purpose when the contract changes. A golden diff is the prompt to ask
+# whether the change is additive (allowed, bump nothing) or a breaking reshape
+# (needs the contract version bumped and docs/tile-contract.md updated in the
+# same commit). Running it alone is what you do while iterating on a formatter.
+#
+# The goldens are only meaningful because a tick is a pure function of (ledger,
+# clock, thresholds) — docs/adr/0001-stream-first-tile.md is what makes that
+# true, so if this task ever needs a sleep, that ADR has been violated.
+run = "scripts/with-crate.sh cargo test --test goldens"
+
+[tasks.bench]
+description = "Measure the per-tick ceiling the spec sets (release, synthetic ledger, minutes)"
+# Release is not optional and the task encodes it rather than trusting a human to
+# remember: the ceiling in docs/spec.md is a release-profile number, and a debug
+# fold over a synthetic ledger misses it by more than an order of magnitude —
+# which makes a debug run a measurement of the profile, not of the code.
+#
+# Deliberately NOT part of `check`: it writes a large synthetic ledger and takes
+# minutes. A required gate with those properties is one people switch off. Run it
+# when you have touched a reader, the fold, or the resume cursor.
+run = "scripts/with-crate.sh cargo test --release --test bench -- --ignored --nocapture"
+
+[tasks.fleet]
+description = "Soak-test vigil against a live multi-agent fleet writing a real ledger"
+# Deliberately NOT in `check`. It is minutes long, it is probabilistic, and it
+# needs a pact-initialised repo with workers writing to it — three properties
+# that turn a required gate into one people disable.
+#
+# The pair is what makes it a measurement rather than a demo: the control run
+# ticks with the resume cursor deleted before every tick (so every tick is a full
+# re-read) and the treatment run ticks normally, and the two MUST produce byte-
+# identical tiles. That is the invariant of
+# docs/adr/0001-stream-first-tile.md stated as an experiment — a cursor is
+# correct only if throwing it away changes nothing but the time taken.
+run = "scripts/with-crate.sh scripts/fleet-sim.sh"
+
+[tasks.fmt]
+description = "Format the code"
+run = "scripts/with-crate.sh cargo fmt"
+
+[tasks."fmt-check"]
+description = "Check formatting without writing changes"
+run = "scripts/with-crate.sh cargo fmt -- --check"
+
+[tasks.lint]
+description = "Run clippy with warnings denied, over all targets"
+# --all-targets, not the default: the default misses tests/, and the proof
+# obligations in docs/spec.md live there.
+run = "scripts/with-crate.sh cargo clippy --all-targets -- -D warnings"
+
+[tasks."lint-scripts"]
+description = "shellcheck every script in scripts/, at warning severity"
+# At `warning` rather than the default, which includes `info` and would be red on
+# arrival for deliberate word-splits — a gate that is red on day one is a gate
+# somebody switches off. At this severity it catches what is actually a bug:
+# unquoted expansions, unreachable code, misused tests.
+run = "shellcheck --severity=warning scripts/*.sh"
+
+[tasks."check-docs"]
+description = "Fail if a doc is missing front matter, an ADR is malformed or unindexed, or a link or anchor is dead"
+# The gate that makes the documentation conventions real. Front matter that
+# nothing checks is front matter half the files will not have by the tenth
+# commit; an ADR index nothing checks is one that stops listing the newest ADR.
+run = "scripts/check-docs.sh"
+
+[tasks.check]
+description = "Run the full CI check locally, serially, as CI does"
+# Sequential, and that is not a preference. `depends` runs tasks in PARALLEL, and
+# these legs all reach the binary through the single path `target/debug/vigil`,
+# which the last build to finish owns. An integration test spawning that file
+# while another leg is mid-rebuild is a race with a confusing failure; pact's own
+# mise.toml records losing three runs out of three to exactly this, and there is
+# no reason to rediscover it.
+#
+# Same order and same commands as the `check` job in .github/workflows/ci.yml.
+run = [
+  "mise run fmt-check",
+  "mise run lint",
+  "mise run lint-scripts",
+  "mise run test",
+  "mise run check-docs",
+]
+
+[tasks.install]
+description = "Build and install the vigil binary onto PATH"
+run = "scripts/with-crate.sh cargo install --path . --force"

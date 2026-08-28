@@ -1,0 +1,25 @@
+# A pin nobody updates is just an old action. Every `uses:` in .github/workflows
+# is pinned by SHA rather than by tag — a tag is a moving pointer its owner can
+# repoint at any commit — and this is what keeps those SHAs current, with the
+# human-readable version in the trailing comment moving alongside them.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      # Conventional Commits are gated by `cog check` on every PR, so a bot whose
+      # subjects do not parse would open PRs that cannot merge.
+      prefix: "build"
+      include: scope
+
+  # Cargo, for when the crate lands. Harmless until then: with no Cargo.toml,
+  # dependabot finds nothing to update rather than erroring.
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "build"
+      include: scope

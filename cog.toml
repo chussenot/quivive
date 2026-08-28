@@ -1,0 +1,40 @@
+# cocogitto owns the version and the changelog. Nothing else may write either:
+# no hand-edited `version =` in Cargo.toml, no hand-added release heading in
+# CHANGELOG.md. See docs/conventions.md for the two-layer changelog rule.
+from_latest_tag = false
+ignore_merge_commits = true
+ignore_fixup_commits = true
+disable_changelog = false
+disable_bump_commit = false
+generate_mono_repository_global_tag = true
+generate_mono_repository_package_tags = true
+branch_whitelist = []
+skip_ci = "[skip ci]"
+skip_untracked = false
+
+# Keep the crate version in step with the tag, and prove the tree still builds
+# before the tag exists. A tag whose manifest disagrees with it ships a binary
+# whose `--version` lies, and that is only discoverable after the fact.
+#
+# Guarded on Cargo.toml, because this repository's conventions and documentation
+# landed before its crate did (docs/studies/conventions-run.md). The guard costs
+# one line and removes itself: once Cargo.toml exists, both hooks run.
+pre_bump_hooks = [
+  "test ! -f Cargo.toml || sed -i '0,/^version *=/ s/^version *=.*/version = \"{{version}}\"/' Cargo.toml",
+  "test ! -f Cargo.toml || cargo check --quiet",
+]
+post_bump_hooks = []
+pre_package_bump_hooks = []
+post_package_bump_hooks = []
+
+[git_hooks]
+
+[commit_types]
+
+[changelog]
+path = "CHANGELOG.md"
+authors = []
+
+[bump_profiles]
+
+[packages]

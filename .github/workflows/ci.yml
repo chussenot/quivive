@@ -1,0 +1,93 @@
+# One job for the gates, one for commit hygiene. Both invoke the same `mise run`
+# tasks a developer does, so a local pass and a CI pass are the same commands —
+# a local gate that does not match CI is not a gate.
+#
+# No platform matrix and no MSRV job. vigil makes neither promise
+# (docs/adr/0003-yagni-deferral-register.md, D9), and a matrix is three times the
+# minutes for a promise nobody has made. The toolchain is pinned in
+# rust-toolchain.toml instead, which is the promise that *is* made.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+# A PR from a branch of this repository would otherwise run push and
+# pull_request twice.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # Actions are pinned by SHA, not by tag: a tag is a moving pointer its owner
+      # can repoint at any commit, which is the supply-chain hole
+      # `tj-actions/changed-files` fell through. The trailing comment is the
+      # human-readable version, and .github/dependabot.yml is what keeps both
+      # moving — a pin nobody updates is just an old action.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Caches ~/.cargo and ./target, keyed on the lockfile and toolchain. Must
+      # sit before the cargo steps: it restores where it stands and saves in its
+      # post step. A no-op while this repository has no crate, and harmless.
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+
+      # Puts `mise` on PATH so the gates below are the same `mise run` invocations
+      # a developer types. It does NOT install Rust: rust-toolchain.toml is the
+      # single place the compiler is pinned, and rustup honours it on the first
+      # cargo invocation, so mise.toml deliberately has no `[tools] rust`.
+      #
+      # mise's own version is left to the action. Pinning it would be a third
+      # thing to keep current for no promise anyone made; the pin that matters is
+      # the compiler's.
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          install: true
+          cache: true
+
+      # `mise run check` is fmt-check, lint, lint-scripts, test and check-docs,
+      # serially. Serially matters: the legs all reach one binary through one
+      # path, and a parallel rebuild mid-spawn is a race with a confusing failure.
+      #
+      # It is invoked as one step rather than as five so that the order and the
+      # contents cannot drift from mise.toml — which is the whole reason there is
+      # no Makefile.
+      - run: mise run check
+
+  # Conventional-commit lint, PRs only.
+  #
+  # `cog bump` generates the changelog from commit subjects and silently drops
+  # anything it cannot parse into a type it knows — no error, no warning, just a
+  # release note that never mentions the feature. Catching that on a PR costs
+  # seconds; catching it after a tag means rewriting history.
+  #
+  # PR-only on purpose. Running it on push would fail branches for history that is
+  # already immutable, which teaches people to ignore it.
+  commits:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # cog needs real history to walk a range, not a shallow tip.
+          fetch-depth: 0
+      # `install-only`, and it has to be that input specifically: this step exists
+      # only to put `cog` on PATH, because the actual check needs a commit range
+      # the action cannot express. v4.2.0 is the first release with it.
+      - uses: cocogitto/cocogitto-action@52d0023b4396897f1815648e553db2ab8d782f3a # v4.2.0
+        with:
+          install-only: true
+      # Only the commits this PR adds. Checking all history would fail on
+      # pre-existing subjects nobody can fix now, and merge commits come from
+      # GitHub's own template rather than from an author.
+      - name: cog check
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: cog check --ignore-merge-commits "${BASE}..HEAD"

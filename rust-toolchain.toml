@@ -1,0 +1,15 @@
+# Pinned, not floating. This file is the single place the compiler version is
+# decided, so that `mise run check`, CI and a fresh clone all build with the same
+# rustc. A floating `stable` makes every gate a moving target: a lint that is a
+# warning today is `-D warnings` red tomorrow, on a commit nobody touched.
+#
+# The *edition* is chosen in Cargo.toml, and only an edition this channel
+# supports is a legal choice — that pairing is why the pin is named in the house
+# conventions (docs/conventions.md) rather than left to whatever the machine has.
+#
+# Moving the pin is a deliberate commit of its own (`build(toolchain): ...`),
+# never a side effect of another change.
+[toolchain]
+channel = "1.94.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"
