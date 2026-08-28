@@ -15,7 +15,7 @@
 //!   a tick. A status bar going dark because a cache file was corrupt would be
 //!   the cache costing more than it saves.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
@@ -64,6 +64,17 @@ pub struct Cursor {
     /// source could contradict a second later — and the throw-away invariant
     /// would then be false in a way no test could easily see.
     pub agents: BTreeMap<String, DateTime<Utc>>,
+    /// The folded accumulator for `S18`: bead ids seen naming an `acquired`
+    /// row anywhere in the ledger (quivive-374). A set, not a map to a line
+    /// number — membership is all `state::gate_order_violations` needs, and a
+    /// set is a plain union across resumed reads the same way `agents`' fold
+    /// already is, so a resumed tick never has to re-scan bytes it has already
+    /// folded to keep this current. `#[serde(default)]` so a cursor written
+    /// before this field existed still loads instead of discarding a good
+    /// resume point — see [`still_describes`](Cursor::still_describes)'s own
+    /// reasoning for why a missing key here must degrade, not fail.
+    #[serde(default)]
+    pub started: BTreeSet<String>,
 }
 
 impl Cursor {
@@ -74,6 +85,7 @@ impl Cursor {
             tail_len: 0,
             tail_hash: 0,
             agents: BTreeMap::new(),
+            started: BTreeSet::new(),
         }
     }
 
@@ -160,6 +172,7 @@ mod tests {
             tail_len: line.len() as u64,
             tail_hash: hash(line),
             agents: BTreeMap::new(),
+            started: BTreeSet::new(),
         }
     }
 
@@ -232,10 +245,25 @@ mod tests {
                 .unwrap()
                 .to_utc(),
         );
+        c.started.insert("bead-9".into());
         save(dir.path(), &c);
         let back = load(dir.path()).expect("saved cursor should load");
         assert_eq!(back.offset, 42);
         assert_eq!(back.agents.len(), 1);
+        assert_eq!(back.started, ["bead-9".to_string()].into());
         assert!(back.still_describes(100, b"abcdefg"));
+    }
+
+    #[test]
+    fn a_cursor_written_before_started_existed_still_loads() {
+        // quivive-374: `started` is `#[serde(default)]` so an old cursor on
+        // disk (from before this field existed) degrades to "nothing started
+        // yet folded" rather than failing to parse and forcing a needless
+        // cold read.
+        let dir = tempfile::tempdir().unwrap();
+        let json = r#"{"v":1,"offset":42,"tail_len":7,"tail_hash":123,"agents":{}}"#;
+        std::fs::write(path_in(dir.path()), json).unwrap();
+        let c = load(dir.path()).expect("a cursor missing `started` still loads");
+        assert!(c.started.is_empty());
     }
 }
