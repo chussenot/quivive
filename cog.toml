@@ -1,16 +1,25 @@
 # cocogitto owns the version and the changelog. Nothing else may write either:
 # no hand-edited `version =` in Cargo.toml, no hand-added release heading in
 # CHANGELOG.md. See docs/conventions.md for the two-layer changelog rule.
+#
+# Deliberately minimal. The sibling repositories carry four empty tables
+# (`[packages]`, `[bump_profiles]`, `[commit_types]`, `[git_hooks]`) that set
+# nothing, and on cocogitto 7 the first of them is a hard error — `packages` was
+# renamed to `monorepo`, and an unknown field fails config parsing outright, so
+# `cog check` exits 1 before it looks at a single commit. Ceremony that sets
+# nothing is not free; it is one more thing that can break on an upgrade.
+
+# Every commit in history is checked, not just those since the newest tag: this
+# repository has no tag yet, and a check that silently covers nothing is worse
+# than no check.
 from_latest_tag = false
+
+# Merge commits come from GitHub's template rather than from an author, and
+# fixups are noise in a changelog.
 ignore_merge_commits = true
 ignore_fixup_commits = true
-disable_changelog = false
-disable_bump_commit = false
-generate_mono_repository_global_tag = true
-generate_mono_repository_package_tags = true
-branch_whitelist = []
+
 skip_ci = "[skip ci]"
-skip_untracked = false
 
 # Keep the crate version in step with the tag, and prove the tree still builds
 # before the tag exists. A tag whose manifest disagrees with it ships a binary
@@ -23,18 +32,6 @@ pre_bump_hooks = [
   "test ! -f Cargo.toml || sed -i '0,/^version *=/ s/^version *=.*/version = \"{{version}}\"/' Cargo.toml",
   "test ! -f Cargo.toml || cargo check --quiet",
 ]
-post_bump_hooks = []
-pre_package_bump_hooks = []
-post_package_bump_hooks = []
-
-[git_hooks]
-
-[commit_types]
 
 [changelog]
 path = "CHANGELOG.md"
-authors = []
-
-[bump_profiles]
-
-[packages]
