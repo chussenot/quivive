@@ -21,7 +21,44 @@ This file has **two layers**, and both are required by
    what somebody upgrading needs to know. A changelog with only layer 1 is a diff
    with extra steps.
 
-<!-- cocogitto inserts each new release below the `- - -
+<!-- cog inserts each release below the triple-dash separator line. Do not move
+     that separator, and do NOT write a literal one anywhere above it, this
+     comment included: cog anchors on the FIRST occurrence in the file, and the
+     0.1.0 bump spliced its whole record into the middle of this very comment
+     because an earlier wording quoted the separator verbatim while describing
+     it. The record rendered invisible; the repair is in the 0.1.0 Notes. -->
+
+- - -
+## 0.1.0 - 2026-08-28
+
+### Notes
+
+quivive exists because a fleet of coding agents on one machine is easy to run
+and hard to glance at: pact records what happened, recount explains why,
+agentic-db watches the session — and nothing said *when to look*. 0.1.0 is that
+sentry, built to a spec written before the code by a Sonnet fleet coordinated
+through pact under a planning orchestrator, and the contract page the fleet
+implemented shipped unchanged. The surface is deliberately three commands: a
+one-shot `tile` (and its `--stream` push mode for the pwetty tile this release
+contributed to waybar-pwetty-box), `watch` with exactly four notify-send
+transitions that each carry their follow-up command, and `why` with evidence
+lines. Everything else is a row in the deferral register with its reversal
+trigger.
+
+Three things the build itself taught, all shipped fixed and recorded in
+[docs/studies/conventions-run.md](docs/studies/conventions-run.md): the merge
+oracle rejected a test that was green when written and red two hours later
+(real file mtimes racing a frozen clock); the mtime prune was silently freezing
+exactly the time-driven transitions `watch` exists for; and gate-order
+violations were structurally unreachable until the started-set was folded
+through the resume cursor. The numbers that matter: a steady-state tick costs
+~23 µs per repo against the spec's 10 ms ceiling, and the five tile samples are
+byte-identical between this repository's goldens and the pwetty contribution.
+
+Upgrading: nothing to upgrade from — this is the first tag. No binary is
+published and no cross-platform promise is made (deferral D9); `mise run
+install` from a checkout is the supported path.
+
 ## 0.1.0 - 2026-08-28
 #### Bug Fixes
 - **(cli)** rewire main.rs and cli.rs to the reshaped tile Payload API - (2b72b49) - chussenot
@@ -106,26 +143,3 @@ This file has **two layers**, and both are required by
 - **(cli)** update the suite to the quivive binary and the new surface - (d915da7) - chussenot
 - **(fixtures)** add activity/plan/interaction builders to the support module - (61d239e) - chussenot
 - **(goldens)** pin S13's five samples against real fixtures, synced with pwetty - (42230ce) - chussenot
-
-- - -
-` separator. The front
-     matter and this preamble sit above it and are preserved across bumps; do not
-     move the separator. -->
-
-- - -
-
-## Unreleased
-
-No release yet, and no tag. The crate exists and `mise run check` is green, but
-nothing here has been used on a real bar during a real fleet run, which is the
-only evidence that would justify calling a version 0.1.0.
-
-Order of construction, since it is unusual and deliberate: the house conventions
-and the docs gate landed first, then the decision records, then the specification
-and the tile contract — and only then the crate, which implemented the contract
-unchanged. [docs/studies/conventions-run.md](docs/studies/conventions-run.md)
-records what that bought, what it cost, and the six times during both runs that a
-check passed for a reason other than the one claimed.
-
-The first release will be cut with `cog bump` — never by editing a version by
-hand — and will carry the first Notes paragraph.
