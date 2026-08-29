@@ -28,6 +28,7 @@ commands, and there is no second definition of "the tests" to drift.
 | Task | Gate |
 |---|---|
 | `mise run build` | builds |
+| `mise run fmt-check` | `cargo fmt --check` |
 | `mise run test` | unit, reader fixtures, tile goldens |
 | `mise run tile-goldens` | the [tile contract](tile-contract.md) alone, for iterating |
 | `mise run lint` | clippy `--all-targets -- -D warnings` |

@@ -38,7 +38,7 @@ lines they satisfy.
   [ADR-0001](adr/0001-stream-first-tile.md), fed by newest evidence across
   leases, activity records and the events tail.
 - S8. Per-repo status is derived, in precedence order: `human-needed` (any
-  attention item, S16–S19), else `active` (any ACTIVE/IDLE agent), else
+  attention item, S16–S18), else `active` (any ACTIVE/IDLE agent), else
   `drained` (a plan or recent fleet evidence exists but no live agent remains),
   else `all-quiet` (pact present, nothing moving), else `no-fleet` (no pact
   state at all).
