@@ -21,11 +21,13 @@ repository's own committed `.pact/events.jsonl`, rendered by the
 contributed — the fleet that built quivive, seen through quivive, mid-build.
 pact records, recount explains, quivive stays on the qui-vive.*
 
-> **State of the work:** the crate is built and does what this page describes —
-> `mise run check` is green, and the design's load-bearing invariant is asserted
-> against real pact ledgers and against concurrent writers. Unreleased: there is no
-> tag, no published binary, and no cross-platform promise
-> ([D9](docs/adr/0003-yagni-deferral-register.md)). Build it with `mise run build`.
+> **State of the work:** 0.1.0 is tagged — the crate does what this page
+> describes, `mise run check` is green, and the design's load-bearing invariant
+> is asserted against real pact ledgers and against concurrent writers. Still no
+> published binary and no cross-platform promise
+> ([D9](docs/adr/0003-yagni-deferral-register.md)); `mise run install` from a
+> checkout is the supported path, and the
+> [changelog](CHANGELOG.md)'s Notes say why the release exists.
 
 ## The problem
 

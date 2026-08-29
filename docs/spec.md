@@ -170,7 +170,13 @@ persist.
   per-repo entries with agent counts and attention items, `v` for the contract.
 - S12. The tile ships as a contribution in waybar-pwetty-box:
   `tiles/quivive/{schema.json, tile.json, samples/}` in the claude tile's exact
-  house style, every schema property annotated REAL vs MOCK.
+  house style; the schema names `docs/tile-contract.md` as its source of truth
+  and tolerates unknown fields, the contract's additive rule. *(Amended after
+  0.1.0: the original line required every schema property annotated REAL vs
+  MOCK — provenance labels for the era when samples were invented by hand.
+  S13 made the samples byte-copies of this repository's goldens, every field
+  became REAL, and the labels were retired downstream as noise; see
+  [the study](studies/conventions-run.md).)*
 - S13. The samples are exactly: `all-quiet`, `active`, `human-needed`,
   `drained`, `no-fleet` — and golden tests verify them in BOTH repos: quivive
   asserts it can emit each sample byte-for-byte from a fixture, pwetty asserts

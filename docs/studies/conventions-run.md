@@ -502,3 +502,44 @@ The second-laptop simulation and its one-row drift are in
 [docs/beads-on-other-laptops.md](../beads-on-other-laptops.md); the S6 bench
 (23 µs per repo, ceiling 10 ms) is in the fleet-run section above.
 
+## After the tag — the downstream review, and what 0.1.0's own bump broke
+
+quivive's maintainer took the pwetty contribution onward in waybar-pwetty-box
+(schema reconciliation, a minijinja checker fix, mise tasks with an
+inode-verifying waybar restart) and those commits were reviewed from here with
+the house discipline: verify, do not trust. Everything held — including the one
+claim the new schema makes about *this* repository's behavior ("a stale holder
+never produces a `dead_holding_paths` item"), confirmed against `state.rs`'s
+holder filter, where an unknown holder deliberately reads as dead. Gates on the
+reviewed tree: 59 tests and clippy clean, all five samples render, and the
+cross-repo byte-identity test still passes 17/17 from this side.
+
+Three findings worth the ink:
+
+- **S12 amended.** The reconciliation dropped the schema's REAL vs MOCK
+  provenance labels — correctly: they existed for the era when samples were
+  invented by hand, and S13's byte-copy rule made every field REAL. The spec
+  line that required them was amended rather than left to disagree with the
+  artifact it governs; the original wording is preserved in the amendment.
+- **One cold-run flake.** The first `cargo test` after fetching failed a single
+  test; six consecutive runs after it were green. Most likely the
+  stream-respawn timing tests under first-build load. Recorded because a flake
+  seen once and never chased is how a suite's word gets cheap.
+- **A robustness nit, not a bug**: the new `template_locals` helper matches
+  `{% set ` literally, so a whitespace-control variant (`{%- set`) would slip
+  past it and resurrect the false warning it exists to kill. No current
+  template uses that form.
+
+And one the tag itself delivered: **`cog bump` spliced the 0.1.0 record into
+the changelog's own preamble comment.** The preamble described the insertion
+point by quoting the triple-dash separator verbatim, cog anchors on the first
+literal occurrence in the file, and the first occurrence was the quotation —
+so the generated record landed inside an HTML comment, rendered invisible,
+while the stale "No release yet, and no tag" prose below it stayed visible on
+a tagged repository. A comment about the mechanism became the mechanism's
+input: the same self-reference failure this study already records twice
+(Experiment 1's harness reading its own backticks, the seeded image-embed the
+gate flagged in its own documentation). The repair kept the generated layer
+byte-identical — relocated, never edited — added the Notes layer the
+convention requires, and rewrote the preamble to describe the separator
+without containing one.
