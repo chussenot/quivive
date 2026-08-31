@@ -126,3 +126,11 @@ run = [
 [tasks.install]
 description = "Build and install the quivive binary onto PATH"
 run = "cargo install --path . --force"
+
+[tasks."waybar-quivive-off"]
+description = "Disable the quivive tile on this machine's waybar (personal desktop convenience, not part of check)"
+run = "scripts/waybar-quivive-toggle.sh off"
+
+[tasks."waybar-quivive-on"]
+description = "Re-enable the quivive tile on this machine's waybar"
+run = "scripts/waybar-quivive-toggle.sh on"
