@@ -24,6 +24,7 @@ which names it in `supersedes:`; the old one changes only its `status` to
 | 0001 | [The tile is a fold over a streamed ledger, not a query against an index](0001-stream-first-tile.md) | active |
 | 0002 | [No daemon, and quivive does not draw](0002-no-daemon-renderer-boundary.md) | active |
 | 0003 | [The YAGNI deferral register](0003-yagni-deferral-register.md) | active |
+| 0004 | [Focus is emphasis, not filtering](0004-focus-is-emphasis-not-filtering.md) | active |
 
 ## Reading order
 
